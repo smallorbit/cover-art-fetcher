@@ -568,6 +568,113 @@ def api_album_replace(album_id):
     })
 
 
+@app.route("/api/albums/<album_id>/media")
+def api_album_media(album_id):
+    """List existing files in the album's .media/ directory."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+    media_dir = album["path"] / ".media"
+    files = []
+    if media_dir.is_dir():
+        for f in sorted(media_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                try:
+                    size_kb = round(f.stat().st_size / 1024, 1)
+                    with Image.open(f) as img:
+                        w, h = img.size
+                except Exception:
+                    size_kb, w, h = 0, 0, 0
+                files.append({
+                    "filename": f.name,
+                    "size_kb": size_kb,
+                    "width": w,
+                    "height": h,
+                })
+    return jsonify({"files": files})
+
+
+@app.route("/api/albums/<album_id>/media/<path:filename>")
+def api_album_media_file(album_id, filename):
+    """Serve an image from the album's .media/ directory."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+    media_path = album["path"] / ".media" / filename
+    if not media_path.exists() or not media_path.is_file():
+        abort(404)
+    # Prevent path traversal
+    try:
+        media_path.resolve().relative_to((album["path"] / ".media").resolve())
+    except ValueError:
+        abort(403)
+    return send_file(media_path)
+
+
+@app.route("/api/albums/<album_id>/save-media", methods=["POST"])
+def api_album_save_media(album_id):
+    """Download an image and save it to the album's .media/ directory."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+    data = request.get_json()
+    if not data or "url" not in data:
+        return jsonify({"error": "Missing 'url' in request body"}), 400
+
+    url = data["url"]
+    img_type = data.get("type", "Art").strip()
+    # Sanitize type for filename: replace slashes, remove unsafe chars
+    import re
+    safe_type = re.sub(r'[<>:"/\\|?*]', '', img_type.replace("/", "-").replace(" ", "_"))
+    if not safe_type:
+        safe_type = "Art"
+
+    album_dir = album["path"]
+    media_dir = album_dir / ".media"
+    media_dir.mkdir(exist_ok=True)
+
+    try:
+        img_data = fetch_bytes(url)
+    except Exception as e:
+        return jsonify({"error": f"Failed to download: {e}"}), 502
+
+    # Validate image
+    try:
+        img = Image.open(io.BytesIO(img_data))
+        img.verify()
+        img = Image.open(io.BytesIO(img_data))
+        w, h = img.size
+    except Exception:
+        return jsonify({"error": "Downloaded data is not a valid image"}), 400
+
+    ext = ext_from_url(url)
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        ext = ".jpg"
+
+    # Generate a unique filename: Type-001.ext, Type-002.ext, ...
+    counter = 1
+    while True:
+        filename = f"{safe_type}-{counter:03d}{ext}"
+        dest = media_dir / filename
+        if not dest.exists():
+            break
+        counter += 1
+
+    dest.write_bytes(img_data)
+    size_kb = round(len(img_data) / 1024, 1)
+
+    return jsonify({
+        "ok": True,
+        "filename": filename,
+        "size_kb": size_kb,
+        "width": w,
+        "height": h,
+    })
+
+
 @app.route("/api/rescan", methods=["POST"])
 def api_rescan():
     if MUSIC_DIR is None:

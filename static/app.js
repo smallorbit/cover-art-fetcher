@@ -19,6 +19,9 @@ const sourcesLoad  = document.getElementById("sources-loading");
 const sourcesList  = document.getElementById("sources-list");
 const noSourcesMsg = document.getElementById("no-sources-msg");
 const albumCount   = document.getElementById("album-count");
+const mediaList    = document.getElementById("media-list");
+const noMediaMsg   = document.getElementById("no-media-msg");
+const mediaCount   = document.getElementById("media-count");
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 function qualityClass(sizeKb) {
@@ -137,13 +140,19 @@ function openDrawer(albumId) {
   noSourcesMsg.classList.add("hidden");
   sourcesLoad.classList.remove("hidden");
 
+  // Reset media
+  mediaList.innerHTML = "";
+  noMediaMsg.classList.add("hidden");
+  mediaCount.textContent = "";
+
   // Open the drawer
   drawer.classList.add("open");
   overlay.classList.add("visible");
   document.body.classList.add("drawer-open");
 
-  // Fetch sources async
+  // Fetch sources and media async
   loadSources(albumId);
+  loadMedia(albumId);
 }
 
 function closeDrawer() {
@@ -192,7 +201,10 @@ async function loadSources(albumId) {
             <div class="detail">${esc(img.source_detail || img.label)}${matchBadge}</div>
             <div class="sub-detail">${esc(img.type)}${metaParts ? ' \u00b7 ' + esc(metaParts) : ''}</div>
           </div>
-          <button class="use-btn" data-album="${albumId}" data-url="${esc(img.url)}">Use</button>
+          <div class="btn-group">
+            <button class="use-btn" data-album="${albumId}" data-url="${esc(img.url)}">Use</button>
+            <button class="save-btn" data-album="${albumId}" data-url="${esc(img.url)}" data-type="${esc(img.type)}">Save</button>
+          </div>
         </div>`;
       }).join("");
 
@@ -276,6 +288,80 @@ async function replaceCover(btn, albumId, url) {
   }
 }
 
+/* ── Media assets ─────────────────────────────────────────────── */
+async function loadMedia(albumId) {
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/media`);
+    const data = await resp.json();
+    const files = data.files || [];
+    if (files.length === 0) {
+      noMediaMsg.classList.remove("hidden");
+      mediaCount.textContent = "";
+      return;
+    }
+    noMediaMsg.classList.add("hidden");
+    mediaCount.textContent = files.length;
+    mediaList.innerHTML = files.map(f => {
+      const res = f.width && f.height ? formatRes(f.width, f.height) : "";
+      const size = f.size_kb > 0 ? formatSize(f.size_kb) : "";
+      const meta = [res, size].filter(Boolean).join(" \u00b7 ");
+      return `
+        <div class="media-file">
+          <img src="/api/albums/${albumId}/media/${esc(f.filename)}" alt="${esc(f.filename)}" loading="lazy">
+          <div class="source-image-info">
+            <div class="detail">${esc(f.filename)}</div>
+            <div class="sub-detail">${meta}</div>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (e) {
+    noMediaMsg.textContent = "Failed to load media.";
+    noMediaMsg.classList.remove("hidden");
+  }
+}
+
+async function saveToMedia(btn, albumId, url, type) {
+  btn.disabled = true;
+  btn.classList.add("replacing");
+  btn.textContent = "Saving...";
+
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/save-media`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url, type}),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      btn.classList.remove("replacing");
+      btn.classList.add("done");
+      btn.textContent = "Saved!";
+      // Refresh the media list
+      loadMedia(albumId);
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove("done");
+        btn.textContent = "Save";
+      }, 3000);
+    } else {
+      btn.textContent = "Failed";
+      btn.classList.remove("replacing");
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Save";
+      }, 2000);
+    }
+  } catch (e) {
+    btn.textContent = "Error";
+    btn.classList.remove("replacing");
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }, 2000);
+  }
+}
+
 /* ── Event listeners ──────────────────────────────────────────── */
 grid.addEventListener("click", (e) => {
   const card = e.target.closest(".album-card");
@@ -290,9 +376,14 @@ document.addEventListener("keydown", (e) => {
 });
 
 sourcesList.addEventListener("click", (e) => {
-  const btn = e.target.closest(".use-btn");
-  if (btn && !btn.disabled) {
-    replaceCover(btn, btn.dataset.album, btn.dataset.url);
+  const useBtn = e.target.closest(".use-btn");
+  if (useBtn && !useBtn.disabled) {
+    replaceCover(useBtn, useBtn.dataset.album, useBtn.dataset.url);
+    return;
+  }
+  const saveBtn = e.target.closest(".save-btn");
+  if (saveBtn && !saveBtn.disabled) {
+    saveToMedia(saveBtn, saveBtn.dataset.album, saveBtn.dataset.url, saveBtn.dataset.type);
   }
 });
 
