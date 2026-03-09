@@ -177,16 +177,24 @@ async function loadSources(albumId) {
     }
 
     sourcesList.innerHTML = data.sources.map(src => {
-      const images = src.images.map(img => `
-        <div class="source-image">
+      const images = src.images.map(img => {
+        const res = img.width && img.height ? `${img.width}\u00d7${img.height}` : "";
+        const size = img.size_kb > 0 ? formatSize(img.size_kb) : "";
+        const metaParts = [res, size].filter(Boolean).join(" \u00b7 ");
+        const matchBadge = img.match === "current"
+          ? `<span class="match-badge">Current</span>`
+          : "";
+        const isCurrent = img.match === "current";
+        return `
+        <div class="source-image${isCurrent ? ' is-current' : ''}">
           <img src="${esc(img.thumbnail_url)}" alt="thumbnail" loading="lazy">
           <div class="source-image-info">
-            <div class="detail">${esc(img.source_detail || img.label)}</div>
-            <div class="sub-detail">${esc(img.type)} &middot; ${esc(img.label)}</div>
+            <div class="detail">${esc(img.source_detail || img.label)}${matchBadge}</div>
+            <div class="sub-detail">${esc(img.type)}${metaParts ? ' \u00b7 ' + esc(metaParts) : ''}</div>
           </div>
           <button class="use-btn" data-album="${albumId}" data-url="${esc(img.url)}">Use</button>
-        </div>
-      `).join("");
+        </div>`;
+      }).join("");
 
       return `
         <div class="source-group">

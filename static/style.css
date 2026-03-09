@@ -426,6 +426,26 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   color: var(--green);
 }
 
+.source-image.is-current {
+  opacity: 0.55;
+  border: 1px dashed var(--text-dim);
+  border-radius: var(--radius);
+}
+
+.match-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: var(--text-dim);
+  color: var(--bg);
+  vertical-align: middle;
+}
+
 #no-sources-msg {
   color: var(--text-dim);
   font-size: 0.85rem;
