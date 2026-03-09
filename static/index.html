@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cover Art Browser</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>Cover Art Browser</h1>
+      <span id="album-count" class="badge"></span>
+    </div>
+    <div class="header-right">
+      <input type="text" id="search-input" placeholder="Search albums..." autocomplete="off">
+      <select id="filter-select">
+        <option value="all">All albums</option>
+        <option value="low">Low quality (&lt; 500 KB)</option>
+        <option value="medium">Medium (500 KB – 1 MB)</option>
+        <option value="high">High quality (&gt; 1 MB)</option>
+        <option value="missing">No cover</option>
+      </select>
+      <button id="rescan-btn" title="Rescan library">Rescan</button>
+    </div>
+  </header>
+
+  <main id="album-grid"></main>
+
+  <div id="drawer-overlay" class="hidden"></div>
+  <aside id="drawer" class="closed">
+    <div class="drawer-header">
+      <h2 id="drawer-title">Album</h2>
+      <button id="drawer-close">&times;</button>
+    </div>
+
+    <div id="drawer-current">
+      <h3>Current Cover</h3>
+      <div class="current-cover-wrap">
+        <img id="current-cover" alt="Current cover">
+        <div id="current-meta" class="meta-badges"></div>
+      </div>
+      <p id="no-cover-msg" class="hidden">No cover art found for this album.</p>
+    </div>
+
+    <div id="drawer-media">
+      <h3>Media Assets <span id="media-count" class="badge"></span></h3>
+      <div id="media-list"></div>
+      <p id="no-media-msg" class="hidden">No media assets yet.</p>
+    </div>
+
+    <div id="drawer-sources">
+      <h3>Find Higher Resolution</h3>
+      <div id="sources-loading" class="hidden">
+        <div class="spinner"></div>
+        <span>Searching sources...</span>
+      </div>
+      <div id="sources-list"></div>
+      <p id="no-sources-msg" class="hidden">No alternative artwork found.</p>
+    </div>
+  </aside>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
