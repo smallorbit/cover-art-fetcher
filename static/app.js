@@ -362,7 +362,7 @@ async function loadMedia(albumId) {
   try {
     const resp = await fetch(`/api/albums/${albumId}/media`);
     const data = await resp.json();
-    const files = data.files || [];
+    const files = (data.files || []).sort((a, b) => b.size_kb - a.size_kb);
     if (files.length === 0) {
       noMediaMsg.classList.remove("hidden");
       mediaCount.textContent = "";
