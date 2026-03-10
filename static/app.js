@@ -25,6 +25,7 @@ const mediaCount      = document.getElementById("media-count");
 const mbidInput       = document.getElementById("mbid-input");
 const mbidSearchBtn   = document.getElementById("mbid-search-btn");
 const mbidReleaseInfo = document.getElementById("mbid-release-info");
+const currentMbid     = document.getElementById("current-mbid");
 const lightbox        = document.getElementById("lightbox");
 const lightboxImg     = document.getElementById("lightbox-img");
 const confirmModal    = document.getElementById("confirm-modal");
@@ -144,8 +145,23 @@ function openDrawer(albumId) {
     noCoverMsg.classList.remove("hidden");
   }
 
-  // Reset MBID search
-  mbidInput.value = "";
+  // Show MBID from tags
+  if (album.mbid) {
+    const label = document.createElement("span");
+    label.className = "mbid-label";
+    label.textContent = "MB ID: ";
+    const value = document.createElement("span");
+    value.className = "mbid-value";
+    value.textContent = album.mbid;
+    currentMbid.replaceChildren(label, value);
+    currentMbid.className = "mbid-found";
+  } else {
+    currentMbid.textContent = "No MB ID found in music files";
+    currentMbid.className = "mbid-missing";
+  }
+
+  // Pre-fill MBID search with tag value if available
+  mbidInput.value = album.mbid || "";
   mbidInput.setCustomValidity("");
   mbidReleaseInfo.classList.add("hidden");
   mbidReleaseInfo.textContent = "";
