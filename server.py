@@ -721,6 +721,86 @@ def api_album_delete_media(album_id, filename):
     return jsonify({"ok": True})
 
 
+@app.route("/api/albums/<album_id>/use-media", methods=["POST"])
+def api_album_use_media(album_id):
+    """Swap a .media/ file in as the cover, archiving the current cover to .media/."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+    data = request.get_json()
+    if not data or "filename" not in data:
+        return jsonify({"error": "Missing 'filename' in request body"}), 400
+
+    album_dir = album["path"]
+    media_dir = album_dir / ".media"
+    media_path = (media_dir / data["filename"]).resolve()
+
+    try:
+        media_path.relative_to(media_dir.resolve())
+    except ValueError:
+        abort(403)
+    if not media_path.exists() or not media_path.is_file():
+        abort(404)
+
+    try:
+        img = Image.open(media_path)
+        img.verify()
+        img = Image.open(media_path)
+        w, h = img.size
+    except Exception:
+        return jsonify({"error": "File is not a valid image"}), 400
+
+    # Archive current cover into .media/ before replacing it
+    current_cover = _find_cover(album_dir)
+    if current_cover:
+        media_dir.mkdir(exist_ok=True)
+        cover_ext = current_cover.suffix
+        counter = 1
+        while True:
+            backup_name = f"Cover-{counter:03d}{cover_ext}"
+            if not (media_dir / backup_name).exists():
+                break
+            counter += 1
+        current_cover.rename(media_dir / backup_name)
+        for old_ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            thumb = album_dir / f"thumbnail{old_ext}"
+            if thumb.exists():
+                thumb.unlink()
+
+    new_ext = media_path.suffix
+    new_cover = album_dir / f"cover{new_ext}"
+    img_data = media_path.read_bytes()
+    media_path.rename(new_cover)
+
+    size_kb = round(len(img_data) / 1024, 1)
+
+    try:
+        thumb_img = Image.open(new_cover)
+        thumb_img.thumbnail((250, 250), Image.LANCZOS)
+        thumb_path = album_dir / f"thumbnail{new_ext}"
+        if new_ext in (".jpg", ".jpeg"):
+            thumb_img.save(thumb_path, "JPEG", quality=85)
+        else:
+            thumb_img.save(thumb_path)
+    except Exception:
+        pass
+
+    with _albums_lock:
+        albums[album_id]["cover_path"] = new_cover
+        albums[album_id]["has_cover"] = True
+        albums[album_id]["cover_size_kb"] = size_kb
+        albums[album_id]["cover_width"] = w
+        albums[album_id]["cover_height"] = h
+
+    return jsonify({
+        "ok": True,
+        "cover_size_kb": size_kb,
+        "cover_width": w,
+        "cover_height": h,
+    })
+
+
 @app.route("/api/rescan", methods=["POST"])
 def api_rescan():
     if MUSIC_DIR is None:

@@ -395,13 +395,23 @@ async function loadMedia(albumId) {
       subDetail.textContent = meta;
       info.append(detail, subDetail);
 
+      const useBtn = document.createElement("button");
+      useBtn.className = "use-btn";
+      useBtn.textContent = "Use";
+      useBtn.dataset.album = albumId;
+      useBtn.dataset.filename = f.filename;
+
       const delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
       delBtn.textContent = "Delete";
       delBtn.dataset.album = albumId;
       delBtn.dataset.filename = f.filename;
 
-      row.append(img, info, delBtn);
+      const btnGroup = document.createElement("div");
+      btnGroup.className = "btn-group";
+      btnGroup.append(useBtn, delBtn);
+
+      row.append(img, info, btnGroup);
       mediaList.appendChild(row);
     }
   } catch (e) {
@@ -428,6 +438,56 @@ confirmOk.addEventListener("click", () => {
   confirmModal.classList.add("hidden");
   if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
 });
+
+async function useMediaAsCover(btn, albumId, filename) {
+  btn.disabled = true;
+  btn.classList.add("replacing");
+  btn.textContent = "Applying...";
+
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/use-media`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename}),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      btn.classList.remove("replacing");
+      btn.classList.add("done");
+      btn.textContent = "Done!";
+
+      const album = allAlbums.find(a => a.id === albumId);
+      if (album) {
+        album.has_cover = true;
+        album.cover_size_kb = data.cover_size_kb;
+        album.cover_width = data.cover_width;
+        album.cover_height = data.cover_height;
+      }
+
+      currentCover.src = `/api/albums/${albumId}/cover?t=${Date.now()}`;
+      currentCover.classList.remove("hidden");
+      noCoverMsg.classList.add("hidden");
+      const q = qualityClass(data.cover_size_kb);
+      currentMeta.innerHTML = `
+        <span class="meta-badge">${formatRes(data.cover_width, data.cover_height)}</span>
+        <span class="meta-badge ${q ? 'quality-' + q : ''}">${formatSize(data.cover_size_kb)}</span>
+      `;
+      currentMeta.classList.remove("hidden");
+
+      renderGrid();
+      loadMedia(albumId);
+    } else {
+      btn.textContent = "Failed";
+      btn.classList.remove("replacing");
+      setTimeout(() => { btn.disabled = false; btn.textContent = "Use"; }, 2000);
+    }
+  } catch (e) {
+    btn.textContent = "Error";
+    btn.classList.remove("replacing");
+    setTimeout(() => { btn.disabled = false; btn.textContent = "Use"; }, 2000);
+  }
+}
 
 async function deleteMediaFile(btn, albumId, filename) {
   const confirmed = await showConfirm(`Delete "${filename}"? This cannot be undone.`);
@@ -570,6 +630,11 @@ currentCover.addEventListener("click", () => {
 lightbox.addEventListener("click", closeLightbox);
 
 mediaList.addEventListener("click", (e) => {
+  const useBtn = e.target.closest(".use-btn");
+  if (useBtn && !useBtn.disabled) {
+    useMediaAsCover(useBtn, useBtn.dataset.album, useBtn.dataset.filename);
+    return;
+  }
   const delBtn = e.target.closest(".delete-btn");
   if (delBtn && !delBtn.disabled) {
     deleteMediaFile(delBtn, delBtn.dataset.album, delBtn.dataset.filename);
