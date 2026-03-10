@@ -81,7 +81,7 @@ function renderGrid() {
   const filter = filterSelect.value;
 
   const filtered = allAlbums.filter(a => {
-    if (query && !a.name.toLowerCase().includes(query)) return false;
+    if (query && !a.name.toLowerCase().includes(query) && !a.artist.toLowerCase().includes(query)) return false;
     if (filter === "low")     return a.has_cover && a.cover_size_kb < 500;
     if (filter === "medium")  return a.has_cover && a.cover_size_kb >= 500 && a.cover_size_kb < 1024;
     if (filter === "high")    return a.has_cover && a.cover_size_kb >= 1024;
@@ -587,7 +587,11 @@ sourcesList.addEventListener("click", (e) => {
   }
 });
 
-searchInput.addEventListener("input", renderGrid);
+let _searchTimer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(renderGrid, 200);
+});
 filterSelect.addEventListener("change", renderGrid);
 
 const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

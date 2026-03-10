@@ -116,10 +116,14 @@ def scan_library(root: Path) -> dict[str, dict]:
                 pass
         cover_path = _find_cover(path)
         info = _cover_info(cover_path)
+        artist, _ = _parse_artist_album(path.name)
+        if not artist and path.parent != root:
+            artist = path.parent.name
         result[aid] = {
             "id": aid,
             "path": path,
             "name": path.name,
+            "artist": artist,
             "mbid": mbid,
             "cover_path": cover_path,
             **info,
@@ -474,6 +478,7 @@ def api_albums():
             album_list.append({
                 "id": a["id"],
                 "name": a["name"],
+                "artist": a["artist"],
                 "mbid": a["mbid"],
                 "has_cover": a["has_cover"],
                 "cover_size_kb": a["cover_size_kb"],
