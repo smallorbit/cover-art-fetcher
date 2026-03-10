@@ -319,6 +319,17 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   padding: 20px;
 }
 
+#current-mbid {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+#current-mbid.mbid-found { color: var(--text-dim); }
+#current-mbid.mbid-found .mbid-label { opacity: 0.7; }
+#current-mbid.mbid-found .mbid-value { font-family: monospace; letter-spacing: 0.02em; }
+#current-mbid.mbid-missing { color: var(--text-dim); font-style: italic; opacity: 0.7; }
+
 /* ── Sources ──────────────────────────────────────────────────── */
 #sources-loading {
   display: flex;
