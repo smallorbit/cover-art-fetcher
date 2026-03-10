@@ -569,4 +569,28 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   #search-input { width: 140px; }
 }
 
+/* ── Lightbox ─────────────────────────────────────────────────── */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+#lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.8);
+}
+
+.current-cover-wrap img { cursor: zoom-in; }
+.media-file img          { cursor: zoom-in; }
+.source-image img        { cursor: zoom-in; }
+
 .hidden { display: none !important; }
