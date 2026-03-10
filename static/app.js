@@ -4,24 +4,27 @@ let activeAlbumId = null;
 let sourcesAbort = null;  // AbortController for in-flight source requests
 
 /* ── DOM refs ─────────────────────────────────────────────────── */
-const grid         = document.getElementById("album-grid");
-const searchInput  = document.getElementById("search-input");
-const filterSelect = document.getElementById("filter-select");
-const rescanBtn    = document.getElementById("rescan-btn");
-const drawer       = document.getElementById("drawer");
-const overlay      = document.getElementById("drawer-overlay");
-const drawerTitle  = document.getElementById("drawer-title");
-const drawerClose  = document.getElementById("drawer-close");
-const currentCover = document.getElementById("current-cover");
-const currentMeta  = document.getElementById("current-meta");
-const noCoverMsg   = document.getElementById("no-cover-msg");
-const sourcesLoad  = document.getElementById("sources-loading");
-const sourcesList  = document.getElementById("sources-list");
-const noSourcesMsg = document.getElementById("no-sources-msg");
-const albumCount   = document.getElementById("album-count");
-const mediaList    = document.getElementById("media-list");
-const noMediaMsg   = document.getElementById("no-media-msg");
-const mediaCount   = document.getElementById("media-count");
+const grid            = document.getElementById("album-grid");
+const searchInput     = document.getElementById("search-input");
+const filterSelect    = document.getElementById("filter-select");
+const rescanBtn       = document.getElementById("rescan-btn");
+const drawer          = document.getElementById("drawer");
+const overlay         = document.getElementById("drawer-overlay");
+const drawerTitle     = document.getElementById("drawer-title");
+const drawerClose     = document.getElementById("drawer-close");
+const currentCover    = document.getElementById("current-cover");
+const currentMeta     = document.getElementById("current-meta");
+const noCoverMsg      = document.getElementById("no-cover-msg");
+const sourcesLoad     = document.getElementById("sources-loading");
+const sourcesList     = document.getElementById("sources-list");
+const noSourcesMsg    = document.getElementById("no-sources-msg");
+const albumCount      = document.getElementById("album-count");
+const mediaList       = document.getElementById("media-list");
+const noMediaMsg      = document.getElementById("no-media-msg");
+const mediaCount      = document.getElementById("media-count");
+const mbidInput       = document.getElementById("mbid-input");
+const mbidSearchBtn   = document.getElementById("mbid-search-btn");
+const mbidReleaseInfo = document.getElementById("mbid-release-info");
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 function qualityClass(sizeKb) {
@@ -135,6 +138,12 @@ function openDrawer(albumId) {
     noCoverMsg.classList.remove("hidden");
   }
 
+  // Reset MBID search
+  mbidInput.value = "";
+  mbidInput.setCustomValidity("");
+  mbidReleaseInfo.classList.add("hidden");
+  mbidReleaseInfo.textContent = "";
+
   // Reset sources
   sourcesList.innerHTML = "";
   noSourcesMsg.classList.add("hidden");
@@ -170,8 +179,51 @@ function closeDrawer() {
   renderGrid();
 }
 
+/* ── Sources ──────────────────────────────────────────────────── */
+function renderSourcesList(sources, albumId) {
+  if (!sources || sources.length === 0) {
+    noSourcesMsg.classList.remove("hidden");
+    return;
+  }
+  sourcesList.innerHTML = sources.map(src => {
+    const images = src.images.map(img => {
+      const res = img.width && img.height ? `${img.width}\u00d7${img.height}` : "";
+      const size = img.size_kb > 0 ? formatSize(img.size_kb) : "";
+      const metaParts = [res, size].filter(Boolean).join(" \u00b7 ");
+      const matchBadge = img.match === "current"
+        ? `<span class="match-badge">Current</span>`
+        : "";
+      const isCurrent = img.match === "current";
+      return `
+      <div class="source-image${isCurrent ? ' is-current' : ''}">
+        <img src="${esc(img.thumbnail_url)}" alt="thumbnail" loading="lazy">
+        <div class="source-image-info">
+          <div class="detail">${esc(img.source_detail || img.label)}${matchBadge}</div>
+          <div class="sub-detail">${esc(img.type)}${metaParts ? ' \u00b7 ' + esc(metaParts) : ''}</div>
+        </div>
+        <div class="btn-group">
+          <button class="use-btn" data-album="${albumId}" data-url="${esc(img.url)}">Use</button>
+          <button class="save-btn" data-album="${albumId}" data-url="${esc(img.url)}" data-type="${esc(img.type)}">Save</button>
+        </div>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="source-group">
+        <div class="source-group-header">${esc(src.source)}</div>
+        ${images}
+      </div>
+    `;
+  }).join("");
+}
+
+function renderReleaseInfo(release) {
+  const parts = [release.artist, release.album, release.year, release.label].filter(Boolean);
+  mbidReleaseInfo.textContent = parts.join(" \u00b7 ");
+  mbidReleaseInfo.classList.remove("hidden");
+}
+
 async function loadSources(albumId) {
-  // Cancel any previous request
   if (sourcesAbort) sourcesAbort.abort();
   sourcesAbort = new AbortController();
 
@@ -179,43 +231,38 @@ async function loadSources(albumId) {
     const resp = await fetch(`/api/albums/${albumId}/sources`, { signal: sourcesAbort.signal });
     const data = await resp.json();
     sourcesLoad.classList.add("hidden");
+    renderSourcesList(data.sources, albumId);
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      sourcesLoad.classList.add("hidden");
+      noSourcesMsg.textContent = "Failed to load sources.";
+      noSourcesMsg.classList.remove("hidden");
+    }
+  }
+}
 
-    if (!data.sources || data.sources.length === 0) {
+async function loadSourcesByMbid(albumId, mbid) {
+  if (sourcesAbort) sourcesAbort.abort();
+  sourcesAbort = new AbortController();
+
+  sourcesList.innerHTML = "";
+  noSourcesMsg.classList.add("hidden");
+  mbidReleaseInfo.classList.add("hidden");
+  sourcesLoad.classList.remove("hidden");
+
+  try {
+    const resp = await fetch(`/api/mbid/${encodeURIComponent(mbid)}/sources`, { signal: sourcesAbort.signal });
+    const data = await resp.json();
+    sourcesLoad.classList.add("hidden");
+
+    if (!resp.ok) {
+      noSourcesMsg.textContent = data.error || "Release not found.";
       noSourcesMsg.classList.remove("hidden");
       return;
     }
 
-    sourcesList.innerHTML = data.sources.map(src => {
-      const images = src.images.map(img => {
-        const res = img.width && img.height ? `${img.width}\u00d7${img.height}` : "";
-        const size = img.size_kb > 0 ? formatSize(img.size_kb) : "";
-        const metaParts = [res, size].filter(Boolean).join(" \u00b7 ");
-        const matchBadge = img.match === "current"
-          ? `<span class="match-badge">Current</span>`
-          : "";
-        const isCurrent = img.match === "current";
-        return `
-        <div class="source-image${isCurrent ? ' is-current' : ''}">
-          <img src="${esc(img.thumbnail_url)}" alt="thumbnail" loading="lazy">
-          <div class="source-image-info">
-            <div class="detail">${esc(img.source_detail || img.label)}${matchBadge}</div>
-            <div class="sub-detail">${esc(img.type)}${metaParts ? ' \u00b7 ' + esc(metaParts) : ''}</div>
-          </div>
-          <div class="btn-group">
-            <button class="use-btn" data-album="${albumId}" data-url="${esc(img.url)}">Use</button>
-            <button class="save-btn" data-album="${albumId}" data-url="${esc(img.url)}" data-type="${esc(img.type)}">Save</button>
-          </div>
-        </div>`;
-      }).join("");
-
-      return `
-        <div class="source-group">
-          <div class="source-group-header">${esc(src.source)}</div>
-          ${images}
-        </div>
-      `;
-    }).join("");
-
+    if (data.release) renderReleaseInfo(data.release);
+    renderSourcesList(data.sources, albumId);
   } catch (e) {
     if (e.name !== "AbortError") {
       sourcesLoad.classList.add("hidden");
@@ -389,6 +436,25 @@ sourcesList.addEventListener("click", (e) => {
 
 searchInput.addEventListener("input", renderGrid);
 filterSelect.addEventListener("change", renderGrid);
+
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function triggerMbidSearch() {
+  const mbid = mbidInput.value.trim();
+  if (!_UUID_RE.test(mbid)) {
+    mbidInput.setCustomValidity("Enter a valid MusicBrainz Release UUID");
+    mbidInput.reportValidity();
+    return;
+  }
+  mbidInput.setCustomValidity("");
+  loadSourcesByMbid(activeAlbumId, mbid);
+}
+
+mbidSearchBtn.addEventListener("click", triggerMbidSearch);
+mbidInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") triggerMbidSearch();
+});
+mbidInput.addEventListener("input", () => mbidInput.setCustomValidity(""));
 
 rescanBtn.addEventListener("click", async () => {
   rescanBtn.disabled = true;

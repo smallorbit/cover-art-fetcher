@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import struct
 import threading
 import time
@@ -22,6 +23,7 @@ from fetch_cover_art import (
     read_mbid_from_file,
     first_music_file,
     fetch_release_info,
+    fetch_release_metadata,
     fetch_cover_art_listing,
     fetch_bytes,
     ext_from_url,
@@ -394,21 +396,21 @@ def _search_discogs(artist: str, album: str) -> dict:
     return source
 
 
-def fetch_sources(album: dict) -> list[dict]:
+def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> list[dict]:
     """Query all sources in parallel, probe images, and detect duplicates."""
     mbid = album.get("mbid")
-    artist, album_name = "", ""
 
-    # Try to get artist/album from MusicBrainz first
-    if mbid:
-        try:
-            artist, album_name = _rate_limited_mb(fetch_release_info, mbid)
-        except FetchError:
-            pass
-
-    # Fallback: parse from directory name
     if not artist and not album_name:
-        artist, album_name = _parse_artist_album(album["name"])
+        # Try to get artist/album from MusicBrainz first
+        if mbid:
+            try:
+                artist, album_name = _rate_limited_mb(fetch_release_info, mbid)
+            except FetchError:
+                pass
+
+        # Fallback: parse from directory name
+        if not artist and not album_name:
+            artist, album_name = _parse_artist_album(album["name"])
 
     sources = []
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -452,6 +454,11 @@ def fetch_sources(album: dict) -> list[dict]:
 # Routes
 # ---------------------------------------------------------------------------
 
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
+
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
@@ -493,6 +500,26 @@ def api_album_sources(album_id):
         abort(404)
     sources = fetch_sources(album)
     return jsonify({"sources": sources})
+
+
+@app.route("/api/mbid/<mbid>/sources")
+def api_mbid_sources(mbid):
+    if not _UUID_RE.fullmatch(mbid):
+        return jsonify({"error": "Invalid MBID format"}), 400
+    try:
+        release = _rate_limited_mb(fetch_release_metadata, mbid)
+    except FetchError:
+        return jsonify({"error": "Release not found in MusicBrainz."}), 404
+    synthetic_album = {
+        "id": mbid,
+        "name": f"{release['artist']} - {release['album']}",
+        "mbid": mbid,
+        "cover_size_kb": 0,
+        "cover_width": 0,
+        "cover_height": 0,
+    }
+    sources = fetch_sources(synthetic_album, artist=release["artist"], album_name=release["album"])
+    return jsonify({"sources": sources, "release": release})
 
 
 @app.route("/api/albums/<album_id>/replace", methods=["POST"])

@@ -93,6 +93,35 @@ def fetch_release_info(mbid: str) -> tuple[str, str]:
     return "".join(artist_parts), album
 
 
+def fetch_release_metadata(mbid: str) -> dict:
+    """Return extended release metadata from MusicBrainz.
+
+    Returns a dict with keys: artist, album, year, label.
+    Raises FetchError on failure.
+    """
+    data = get(f"{MB_BASE}/{mbid}?fmt=json&inc=artist-credits+labels")
+    album = data.get("title", "")
+    credits = data.get("artist-credit", [])
+    artist_parts = []
+    for credit in credits:
+        if isinstance(credit, dict) and "artist" in credit:
+            artist_parts.append(credit["artist"]["name"])
+            if credit.get("joinphrase"):
+                artist_parts.append(credit["joinphrase"])
+    artist = "".join(artist_parts)
+
+    date = data.get("date", "")
+    year = date[:4] if date else None
+
+    label = None
+    label_infos = data.get("label-info", [])
+    if label_infos:
+        li = label_infos[0]
+        label = (li.get("label") or {}).get("name")
+
+    return {"artist": artist, "album": album, "year": year, "label": label}
+
+
 def fetch_cover_art_listing(mbid: str) -> dict:
     return get(f"{CAA_BASE}/{mbid}")
 
