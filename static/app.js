@@ -25,6 +25,8 @@ const mediaCount      = document.getElementById("media-count");
 const mbidInput       = document.getElementById("mbid-input");
 const mbidSearchBtn   = document.getElementById("mbid-search-btn");
 const mbidReleaseInfo = document.getElementById("mbid-release-info");
+const lightbox        = document.getElementById("lightbox");
+const lightboxImg     = document.getElementById("lightbox-img");
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 function qualityClass(sizeKb) {
@@ -196,7 +198,7 @@ function renderSourcesList(sources, albumId) {
       const isCurrent = img.match === "current";
       return `
       <div class="source-image${isCurrent ? ' is-current' : ''}">
-        <img src="${esc(img.thumbnail_url)}" alt="thumbnail" loading="lazy">
+        <img src="${esc(img.thumbnail_url)}" data-fullurl="${esc(img.url)}" alt="thumbnail" loading="lazy">
         <div class="source-image-info">
           <div class="detail">${esc(img.source_detail || img.label)}${matchBadge}</div>
           <div class="sub-detail">${esc(img.type)}${metaParts ? ' \u00b7 ' + esc(metaParts) : ''}</div>
@@ -419,7 +421,10 @@ drawerClose.addEventListener("click", closeDrawer);
 overlay.addEventListener("click", closeDrawer);
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDrawer();
+  if (e.key === "Escape") {
+    if (!lightbox.classList.contains("hidden")) closeLightbox();
+    else closeDrawer();
+  }
 });
 
 sourcesList.addEventListener("click", (e) => {
@@ -466,6 +471,33 @@ rescanBtn.addEventListener("click", async () => {
     rescanBtn.disabled = false;
     rescanBtn.textContent = "Rescan";
   }
+});
+
+/* ── Lightbox ─────────────────────────────────────────────────── */
+function openLightbox(url) {
+  lightboxImg.src = url;
+  lightbox.classList.remove("hidden");
+}
+
+function closeLightbox() {
+  lightbox.classList.add("hidden");
+  lightboxImg.src = "";
+}
+
+currentCover.addEventListener("click", () => {
+  if (!currentCover.classList.contains("hidden")) openLightbox(currentCover.src);
+});
+
+lightbox.addEventListener("click", closeLightbox);
+
+mediaList.addEventListener("click", (e) => {
+  const img = e.target.closest(".media-file img");
+  if (img) openLightbox(img.src);
+});
+
+sourcesList.addEventListener("click", (e) => {
+  const img = e.target.closest(".source-image img");
+  if (img) openLightbox(img.dataset.fullurl);
 });
 
 /* ── Init ─────────────────────────────────────────────────────── */
