@@ -702,6 +702,25 @@ def api_album_save_media(album_id):
     })
 
 
+@app.route("/api/albums/<album_id>/media/<path:filename>", methods=["DELETE"])
+def api_album_delete_media(album_id, filename):
+    """Delete a file from the album's .media/ directory."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+    media_dir = (album["path"] / ".media").resolve()
+    media_path = (album["path"] / ".media" / filename).resolve()
+    try:
+        media_path.relative_to(media_dir)
+    except ValueError:
+        abort(403)
+    if not media_path.exists() or not media_path.is_file():
+        abort(404)
+    media_path.unlink()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/rescan", methods=["POST"])
 def api_rescan():
     if MUSIC_DIR is None:

@@ -569,6 +569,81 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   #search-input { width: 140px; }
 }
 
+/* ── Confirmation Modal ───────────────────────────────────────── */
+#confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-dialog {
+  background: var(--bg-drawer);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  min-width: 260px;
+  max-width: 360px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.confirm-dialog p {
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-actions button {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  transition: background 0.15s;
+}
+
+.confirm-actions button:hover { background: var(--bg-hover); }
+
+.confirm-actions button.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.confirm-actions button.danger:hover {
+  background: var(--red);
+  color: #000;
+}
+
+.delete-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--red);
+  font-size: 0.72rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.delete-btn:hover {
+  background: var(--red);
+  color: #000;
+}
+
 /* ── Lightbox ─────────────────────────────────────────────────── */
 #lightbox {
   position: fixed;
