@@ -116,14 +116,17 @@ def scan_library(root: Path) -> dict[str, dict]:
                 pass
         cover_path = _find_cover(path)
         info = _cover_info(cover_path)
-        artist, _ = _parse_artist_album(path.name)
+        artist, album_name = _parse_artist_album(path.name)
         if not artist and path.parent != root:
             artist = path.parent.name
+        if not album_name:
+            album_name = path.name
         result[aid] = {
             "id": aid,
             "path": path,
             "name": path.name,
             "artist": artist,
+            "album_name": album_name,
             "mbid": mbid,
             "cover_path": cover_path,
             **info,
@@ -479,6 +482,7 @@ def api_albums():
                 "id": a["id"],
                 "name": a["name"],
                 "artist": a["artist"],
+                "album_name": a["album_name"],
                 "mbid": a["mbid"],
                 "has_cover": a["has_cover"],
                 "cover_size_kb": a["cover_size_kb"],
@@ -804,6 +808,69 @@ def api_album_use_media(album_id):
         "cover_width": w,
         "cover_height": h,
     })
+
+
+@app.route("/api/albums/<album_id>/mb-releases")
+def api_mb_releases(album_id):
+    """Search MusicBrainz for releases matching this album's artist and title."""
+    with _albums_lock:
+        album = albums.get(album_id)
+    if not album:
+        abort(404)
+
+    artist = album.get("artist", "")
+    album_name = album.get("album_name", "") or album["name"]
+
+    if not artist and not album_name:
+        return jsonify({"releases": []})
+
+    parts = []
+    if album_name:
+        parts.append(f'release:"{album_name}"')
+    if artist:
+        parts.append(f'artistname:"{artist}"')
+    query = " AND ".join(parts)
+
+    url = (
+        f"https://musicbrainz.org/ws/2/release"
+        f"?query={urllib.parse.quote(query)}&fmt=json&limit=12"
+    )
+    def _do_search():
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+
+    try:
+        data = _rate_limited_mb(_do_search)
+    except Exception:
+        return jsonify({"releases": []})
+
+    releases = []
+    for r in data.get("releases", []):
+        artist_credit = "".join(
+            (ac.get("name") or ac.get("artist", {}).get("name", "")) + ac.get("joinphrase", "")
+            for ac in r.get("artist-credit", [])
+            if isinstance(ac, dict)
+        ).strip()
+        label_infos = r.get("label-info", [])
+        label = ""
+        if label_infos and isinstance(label_infos[0], dict):
+            lbl = label_infos[0].get("label")
+            if lbl:
+                label = lbl.get("name", "")
+        release_group = r.get("release-group") or {}
+        releases.append({
+            "id": r["id"],
+            "title": r.get("title", ""),
+            "artist": artist_credit,
+            "date": (r.get("date") or "")[:4],
+            "country": r.get("country", ""),
+            "label": label,
+            "type": release_group.get("primary-type", ""),
+            "score": r.get("score", 0),
+        })
+
+    return jsonify({"releases": releases})
 
 
 @app.route("/api/rescan", methods=["POST"])

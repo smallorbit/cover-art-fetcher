@@ -473,6 +473,26 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   vertical-align: middle;
 }
 
+/* ── MB releases dropdown ─────────────────────────────────────── */
+#mb-releases-wrap {
+  margin-bottom: 10px;
+}
+
+#mb-releases-select {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+  outline: none;
+}
+
+#mb-releases-select:focus { border-color: var(--accent); }
+#mb-releases-select option { background: var(--bg-drawer); }
+
 /* ── MBID search ──────────────────────────────────────────────── */
 #mbid-search {
   display: flex;

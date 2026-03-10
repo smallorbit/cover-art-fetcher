@@ -24,9 +24,11 @@ const albumCount      = document.getElementById("album-count");
 const mediaList       = document.getElementById("media-list");
 const noMediaMsg      = document.getElementById("no-media-msg");
 const mediaCount      = document.getElementById("media-count");
-const mbidInput       = document.getElementById("mbid-input");
-const mbidSearchBtn   = document.getElementById("mbid-search-btn");
-const mbidReleaseInfo = document.getElementById("mbid-release-info");
+const mbidInput         = document.getElementById("mbid-input");
+const mbidSearchBtn     = document.getElementById("mbid-search-btn");
+const mbidReleaseInfo   = document.getElementById("mbid-release-info");
+const mbReleasesWrap    = document.getElementById("mb-releases-wrap");
+const mbReleasesSelect  = document.getElementById("mb-releases-select");
 const currentMbid     = document.getElementById("current-mbid");
 const lightbox        = document.getElementById("lightbox");
 const lightboxImg     = document.getElementById("lightbox-img");
@@ -165,6 +167,10 @@ function openDrawer(albumId) {
     currentMbid.className = "mbid-missing";
   }
 
+  // Reset MB releases dropdown
+  mbReleasesWrap.classList.add("hidden");
+  mbReleasesSelect.innerHTML = '<option value="">— select a version —</option>';
+
   // Pre-fill MBID search with tag value if available
   mbidInput.value = album.mbid || "";
   mbidInput.setCustomValidity("");
@@ -186,8 +192,9 @@ function openDrawer(albumId) {
   overlay.classList.add("visible");
   document.body.classList.add("drawer-open");
 
-  // Fetch sources and media async
+  // Fetch sources, releases, and media async
   loadSources(albumId);
+  loadMbReleases(albumId);
   loadMedia(albumId);
 }
 
@@ -248,6 +255,30 @@ function renderReleaseInfo(release) {
   const parts = [release.artist, release.album, release.year, release.label].filter(Boolean);
   mbidReleaseInfo.textContent = parts.join(" \u00b7 ");
   mbidReleaseInfo.classList.remove("hidden");
+}
+
+async function loadMbReleases(albumId) {
+  mbReleasesWrap.classList.add("hidden");
+  mbReleasesSelect.innerHTML = '<option value="">Loading versions...</option>';
+
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/mb-releases`);
+    const data = await resp.json();
+    const releases = data.releases || [];
+
+    mbReleasesSelect.innerHTML = '<option value="">— select a version —</option>';
+    for (const r of releases) {
+      const parts = [r.title, r.artist, r.type, r.date, r.country, r.label].filter(Boolean);
+      const opt = document.createElement("option");
+      opt.value = r.id;
+      opt.textContent = parts.join(" · ");
+      mbReleasesSelect.appendChild(opt);
+    }
+
+    if (releases.length > 0) mbReleasesWrap.classList.remove("hidden");
+  } catch (e) {
+    // silently hide if fetch fails
+  }
 }
 
 async function loadSources(albumId) {
@@ -608,6 +639,14 @@ function triggerMbidSearch() {
 }
 
 mbidSearchBtn.addEventListener("click", triggerMbidSearch);
+
+mbReleasesSelect.addEventListener("change", () => {
+  const mbid = mbReleasesSelect.value;
+  if (!mbid) return;
+  mbidInput.value = mbid;
+  mbidInput.setCustomValidity("");
+  loadSourcesByMbid(activeAlbumId, mbid);
+});
 mbidInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") triggerMbidSearch();
 });
