@@ -462,6 +462,54 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   vertical-align: middle;
 }
 
+/* ── MBID search ──────────────────────────────────────────────── */
+#mbid-search {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+#mbid-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-family: monospace;
+  outline: none;
+}
+
+#mbid-input:focus { border-color: var(--accent); }
+
+#mbid-search-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+#mbid-search-btn:hover { background: var(--bg-hover); }
+
+#mbid-release-info {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Media assets ─────────────────────────────────────────────── */
 #drawer-media {
   padding: 16px 20px;
