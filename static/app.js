@@ -27,6 +27,10 @@ const mbidSearchBtn   = document.getElementById("mbid-search-btn");
 const mbidReleaseInfo = document.getElementById("mbid-release-info");
 const lightbox        = document.getElementById("lightbox");
 const lightboxImg     = document.getElementById("lightbox-img");
+const confirmModal    = document.getElementById("confirm-modal");
+const confirmMessage  = document.getElementById("confirm-message");
+const confirmCancel   = document.getElementById("confirm-cancel");
+const confirmOk       = document.getElementById("confirm-ok");
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 function qualityClass(sizeKb) {
@@ -350,22 +354,81 @@ async function loadMedia(albumId) {
     }
     noMediaMsg.classList.add("hidden");
     mediaCount.textContent = files.length;
-    mediaList.innerHTML = files.map(f => {
+
+    mediaList.innerHTML = "";
+    for (const f of files) {
       const res = f.width && f.height ? formatRes(f.width, f.height) : "";
       const size = f.size_kb > 0 ? formatSize(f.size_kb) : "";
       const meta = [res, size].filter(Boolean).join(" \u00b7 ");
-      return `
-        <div class="media-file">
-          <img src="/api/albums/${albumId}/media/${esc(f.filename)}" alt="${esc(f.filename)}" loading="lazy">
-          <div class="source-image-info">
-            <div class="detail">${esc(f.filename)}</div>
-            <div class="sub-detail">${meta}</div>
-          </div>
-        </div>`;
-    }).join("");
+
+      const row = document.createElement("div");
+      row.className = "media-file";
+
+      const img = document.createElement("img");
+      img.src = `/api/albums/${albumId}/media/${encodeURIComponent(f.filename)}`;
+      img.alt = f.filename;
+      img.loading = "lazy";
+
+      const info = document.createElement("div");
+      info.className = "source-image-info";
+      const detail = document.createElement("div");
+      detail.className = "detail";
+      detail.textContent = f.filename;
+      const subDetail = document.createElement("div");
+      subDetail.className = "sub-detail";
+      subDetail.textContent = meta;
+      info.append(detail, subDetail);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "delete-btn";
+      delBtn.textContent = "Delete";
+      delBtn.dataset.album = albumId;
+      delBtn.dataset.filename = f.filename;
+
+      row.append(img, info, delBtn);
+      mediaList.appendChild(row);
+    }
   } catch (e) {
     noMediaMsg.textContent = "Failed to load media.";
     noMediaMsg.classList.remove("hidden");
+  }
+}
+
+/* ── Confirm modal ────────────────────────────────────────────── */
+let _confirmResolve = null;
+
+function showConfirm(message) {
+  confirmMessage.textContent = message;
+  confirmModal.classList.remove("hidden");
+  return new Promise(resolve => { _confirmResolve = resolve; });
+}
+
+confirmCancel.addEventListener("click", () => {
+  confirmModal.classList.add("hidden");
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+});
+
+confirmOk.addEventListener("click", () => {
+  confirmModal.classList.add("hidden");
+  if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+});
+
+async function deleteMediaFile(btn, albumId, filename) {
+  const confirmed = await showConfirm(`Delete "${filename}"? This cannot be undone.`);
+  if (!confirmed) return;
+
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/media/${encodeURIComponent(filename)}`, {
+      method: "DELETE",
+    });
+    if (resp.ok) {
+      loadMedia(albumId);
+    } else {
+      btn.disabled = false;
+    }
+  } catch (e) {
+    btn.disabled = false;
   }
 }
 
@@ -491,6 +554,11 @@ currentCover.addEventListener("click", () => {
 lightbox.addEventListener("click", closeLightbox);
 
 mediaList.addEventListener("click", (e) => {
+  const delBtn = e.target.closest(".delete-btn");
+  if (delBtn && !delBtn.disabled) {
+    deleteMediaFile(delBtn, delBtn.dataset.album, delBtn.dataset.filename);
+    return;
+  }
   const img = e.target.closest(".media-file img");
   if (img) openLightbox(img.src);
 });
