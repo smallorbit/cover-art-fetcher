@@ -2,6 +2,8 @@
 let allAlbums = [];
 let activeAlbumId = null;
 let sourcesAbort = null;  // AbortController for in-flight source requests
+let lightboxItems = [];
+let lightboxIndex = -1;
 
 /* ── DOM refs ─────────────────────────────────────────────────── */
 const grid            = document.getElementById("album-grid");
@@ -28,6 +30,9 @@ const mbidReleaseInfo = document.getElementById("mbid-release-info");
 const currentMbid     = document.getElementById("current-mbid");
 const lightbox        = document.getElementById("lightbox");
 const lightboxImg     = document.getElementById("lightbox-img");
+const lightboxPrev    = document.getElementById("lightbox-prev");
+const lightboxNext    = document.getElementById("lightbox-next");
+const lightboxCounter = document.getElementById("lightbox-counter");
 const confirmModal    = document.getElementById("confirm-modal");
 const confirmMessage  = document.getElementById("confirm-message");
 const confirmCancel   = document.getElementById("confirm-cancel");
@@ -564,6 +569,10 @@ document.addEventListener("keydown", (e) => {
     if (!lightbox.classList.contains("hidden")) closeLightbox();
     else closeDrawer();
   }
+  if (!lightbox.classList.contains("hidden")) {
+    if (e.key === "ArrowLeft")  navigateLightbox(-1);
+    if (e.key === "ArrowRight") navigateLightbox(1);
+  }
 });
 
 sourcesList.addEventListener("click", (e) => {
@@ -613,21 +622,48 @@ rescanBtn.addEventListener("click", async () => {
 });
 
 /* ── Lightbox ─────────────────────────────────────────────────── */
-function openLightbox(url) {
+function openLightbox(url, items = [], index = -1) {
+  lightboxItems = items;
+  lightboxIndex = index;
   lightboxImg.src = url;
+
+  const hasNav = items.length > 1;
+  lightboxPrev.classList.toggle("hidden", !hasNav);
+  lightboxNext.classList.toggle("hidden", !hasNav);
+  if (hasNav) {
+    lightboxCounter.textContent = `${index + 1} / ${items.length}`;
+    lightboxCounter.classList.remove("hidden");
+  } else {
+    lightboxCounter.classList.add("hidden");
+  }
+
   lightbox.classList.remove("hidden");
+}
+
+function navigateLightbox(dir) {
+  if (!lightboxItems.length) return;
+  lightboxIndex = (lightboxIndex + dir + lightboxItems.length) % lightboxItems.length;
+  lightboxImg.src = lightboxItems[lightboxIndex];
+  lightboxCounter.textContent = `${lightboxIndex + 1} / ${lightboxItems.length}`;
 }
 
 function closeLightbox() {
   lightbox.classList.add("hidden");
   lightboxImg.src = "";
+  lightboxItems = [];
+  lightboxIndex = -1;
 }
 
 currentCover.addEventListener("click", () => {
   if (!currentCover.classList.contains("hidden")) openLightbox(currentCover.src);
 });
 
-lightbox.addEventListener("click", closeLightbox);
+lightbox.addEventListener("click", (e) => {
+  if (!e.target.closest(".lightbox-nav")) closeLightbox();
+});
+
+lightboxPrev.addEventListener("click", (e) => { e.stopPropagation(); navigateLightbox(-1); });
+lightboxNext.addEventListener("click", (e) => { e.stopPropagation(); navigateLightbox(1); });
 
 mediaList.addEventListener("click", (e) => {
   const useBtn = e.target.closest(".use-btn");
@@ -641,12 +677,21 @@ mediaList.addEventListener("click", (e) => {
     return;
   }
   const img = e.target.closest(".media-file img");
-  if (img) openLightbox(img.src);
+  if (img) {
+    const imgs = [...mediaList.querySelectorAll(".media-file img")];
+    const index = imgs.indexOf(img);
+    openLightbox(img.src, imgs.map(i => i.src), index);
+  }
 });
 
 sourcesList.addEventListener("click", (e) => {
   const img = e.target.closest(".source-image img");
-  if (img) openLightbox(img.dataset.fullurl);
+  if (img) {
+    const group = img.closest(".source-group");
+    const imgs = group ? [...group.querySelectorAll(".source-image img")] : [img];
+    const index = imgs.indexOf(img);
+    openLightbox(img.dataset.fullurl, imgs.map(i => i.dataset.fullurl), index);
+  }
 });
 
 /* ── Init ─────────────────────────────────────────────────────── */
