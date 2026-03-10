@@ -675,6 +675,40 @@ body.drawer-open #album-grid { padding-right: calc(var(--drawer-w) + 24px); }
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.8);
 }
 
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 2.5rem;
+  line-height: 1;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  z-index: 1;
+}
+
+.lightbox-nav:hover { background: rgba(255, 255, 255, 0.18); }
+#lightbox-prev { left: 24px; }
+#lightbox-next { right: 24px; }
+
+#lightbox-counter {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
 .current-cover-wrap img { cursor: zoom-in; }
 .media-file img          { cursor: zoom-in; }
 .source-image img        { cursor: zoom-in; }
