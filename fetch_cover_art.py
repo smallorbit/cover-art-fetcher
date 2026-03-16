@@ -5,15 +5,18 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 
-CAA_BASE = "https://coverartarchive.org/release"
-MB_BASE  = "https://musicbrainz.org/ws/2/release"
-USER_AGENT = "cover-art-fetcher/1.0 ( https://github.com/smallorbit/cover-art-fetcher )"
+CAA_BASE      = "https://coverartarchive.org/release"
+MB_BASE       = "https://musicbrainz.org/ws/2/release"
+ACOUSTID_BASE = "https://api.acoustid.org/v2"
+USER_AGENT    = "cover-art-fetcher/1.0 ( https://github.com/smallorbit/cover-art-fetcher )"
 
 MUSIC_EXTENSIONS = frozenset({
     ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac",
@@ -44,6 +47,26 @@ def get(url: str) -> dict:
             raise FetchError(f"not found — {url}")
         else:
             raise FetchError(f"HTTP {e.code} from {url}")
+    except urllib.error.URLError as e:
+        raise FetchError(f"could not connect — {e.reason}")
+
+
+def post(url: str, data: dict) -> dict:
+    encoded = urllib.parse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=encoded,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        raise FetchError(f"HTTP {e.code} from {url}")
     except urllib.error.URLError as e:
         raise FetchError(f"could not connect — {e.reason}")
 
@@ -120,6 +143,184 @@ def fetch_release_metadata(mbid: str) -> dict:
         label = (li.get("label") or {}).get("name")
 
     return {"artist": artist, "album": album, "year": year, "label": label}
+
+
+def fingerprint_file(path: Path) -> tuple[int, str] | None:
+    """Return (duration_seconds, fingerprint) via fpcalc, or None if unavailable."""
+    try:
+        result = subprocess.run(
+            ["fpcalc", "-json", str(path)],
+            capture_output=True, text=True, timeout=60,
+        )
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+        return int(data["duration"]), data["fingerprint"]
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def lookup_acoustid(api_key: str, duration: int, fingerprint: str) -> list[dict]:
+    """Return release matches from AcoustID, sorted by score descending.
+
+    Each entry has keys: mbid, title, artist, year, score.
+    """
+    data = post(f"{ACOUSTID_BASE}/lookup", {
+        "client": api_key,
+        "meta": "recordings releases",
+        "duration": duration,
+        "fingerprint": fingerprint,
+        "format": "json",
+    })
+
+    if data.get("status") != "ok":
+        return []
+
+    seen: dict[str, dict] = {}
+    for result in data.get("results", []):
+        score = result.get("score", 0)
+        for recording in result.get("recordings", []):
+            for release in recording.get("releases", []):
+                rid = release.get("id")
+                if not rid or (rid in seen and score <= seen[rid]["score"]):
+                    continue
+                artists = release.get("artists", [])
+                artist = ", ".join(a.get("name", "") for a in artists)
+                date = release.get("date", {})
+                seen[rid] = {
+                    "mbid": rid,
+                    "title": release.get("title", ""),
+                    "artist": artist,
+                    "year": date.get("year"),
+                    "score": score,
+                }
+
+    return sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+
+
+def write_mbid_to_file(path: Path, mbid: str) -> bool:
+    """Write MusicBrainz release MBID into audio file tags. Returns True on success."""
+    _require_mutagen()
+    from mutagen import File
+    from mutagen.id3 import TXXX
+    from mutagen.mp4 import MP4Tags
+
+    try:
+        audio = File(path, easy=False)
+    except Exception:
+        return False
+
+    if audio is None:
+        return False
+
+    if audio.tags is None:
+        try:
+            audio.add_tags()
+        except Exception:
+            return False
+
+    tags = audio.tags
+
+    if hasattr(tags, "getall"):
+        tags.delall("TXXX:MusicBrainz Album Id")
+        tags.delall("TXXX:MusicBrainz Release Id")
+        tags.add(TXXX(encoding=3, desc="MusicBrainz Album Id", text=[mbid]))
+    elif isinstance(tags, MP4Tags):
+        from mutagen.mp4 import MP4FreeForm
+        tags["----:com.apple.iTunes:MusicBrainz Album Id"] = [
+            MP4FreeForm(mbid.encode("utf-8"))
+        ]
+    else:
+        tags["musicbrainz_albumid"] = [mbid]
+
+    try:
+        audio.save()
+        return True
+    except Exception:
+        return False
+
+
+def write_mbid_to_directory(music_dir: Path, mbid: str) -> int:
+    """Write MBID to all music files in a directory. Returns count of files updated."""
+    count = 0
+    for f in sorted(music_dir.iterdir()):
+        if f.is_file() and f.suffix.lower() in MUSIC_EXTENSIONS:
+            if write_mbid_to_file(f, mbid):
+                count += 1
+    return count
+
+
+def identify_directory(
+    music_dir: Path, first_file: Path, api_key: str, auto: bool
+) -> str | None:
+    """Fingerprint first_file, look up on AcoustID, let the user pick a release.
+
+    Returns a release MBID or None if skipped/failed.
+    """
+    print(f"  Fingerprinting {first_file.name}...", end=" ", flush=True)
+    fp_data = fingerprint_file(first_file)
+    if fp_data is None:
+        print("failed (is fpcalc installed?)")
+        return None
+
+    duration, fingerprint = fp_data
+    print(f"{duration}s", end=" — looking up... ", flush=True)
+
+    try:
+        matches = lookup_acoustid(api_key, duration, fingerprint)
+    except FetchError as e:
+        print(f"failed ({e})")
+        return None
+
+    if not matches:
+        print("no matches found.")
+        return None
+
+    print("done")
+    top = matches[:5]
+
+    def fmt_match(m: dict) -> str:
+        label = f"{m['artist']} — {m['title']}" if m["artist"] else m["title"]
+        if m["year"]:
+            label += f" ({m['year']})"
+        return f"{label}  [score: {m['score']:.2f}]"
+
+    if auto:
+        best = top[0]
+        if best["score"] >= 0.7:
+            print(f"  Auto-selected: {fmt_match(best)}")
+            print(f"  MBID: {best['mbid']}")
+            return best["mbid"]
+        else:
+            print(f"  Best match score too low ({best['score']:.2f}), skipping.")
+            return None
+
+    print("  AcoustID matches:")
+    for i, m in enumerate(top, 1):
+        print(f"    {i}. {fmt_match(m)}")
+        print(f"       MBID: {m['mbid']}")
+
+    while True:
+        try:
+            choice = input(f"  Select [1-{len(top)}, s=skip]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if choice == "s":
+            return None
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(top):
+                return top[idx]["mbid"]
+        except ValueError:
+            pass
+        print(f"  Please enter a number 1–{len(top)} or 's'.")
 
 
 def fetch_cover_art_listing(mbid: str) -> dict:
@@ -294,7 +495,11 @@ def run_single(mbid: str) -> None:
         sys.exit(f"Error: {e}")
 
 
-def run_directory(root: Path) -> None:
+def run_directory(
+    root: Path,
+    acoustid_key: str | None = None,
+    auto_identify: bool = False,
+) -> None:
     music_dirs = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
@@ -318,9 +523,32 @@ def run_directory(root: Path) -> None:
             continue
 
         mbid = read_mbid_from_file(music_file)
+
         if not mbid:
-            print(f"  Warning: no MusicBrainz ID in tags ({music_file.name}).\n")
-            continue
+            if not acoustid_key:
+                print(f"  No MusicBrainz ID in tags ({music_file.name}).")
+                print("  Pass --acoustid-key (or set ACOUSTID_API_KEY) to enable identification.\n")
+                continue
+
+            if not auto_identify:
+                try:
+                    answer = input(
+                        f"  No MBID in tags ({music_file.name}). Try AcoustID lookup? [y/N] "
+                    ).strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    continue
+                if answer != "y":
+                    print()
+                    continue
+
+            mbid = identify_directory(music_dir, music_file, acoustid_key, auto_identify)
+            if not mbid:
+                print()
+                continue
+
+            written = write_mbid_to_directory(music_dir, mbid)
+            print(f"  Wrote MBID to {written} file(s)")
 
         print(f"  MBID: {mbid}")
         try:
@@ -349,13 +577,23 @@ def main() -> None:
         "-d", "--dir", metavar="PATH",
         help="scan a directory tree and fetch cover art for each music folder found",
     )
+    parser.add_argument(
+        "-k", "--acoustid-key", metavar="KEY",
+        default=os.environ.get("ACOUSTID_API_KEY"),
+        help="AcoustID API key for fingerprint-based identification "
+             "(or set ACOUSTID_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--auto-identify", action="store_true",
+        help="automatically pick the best AcoustID match (score ≥ 0.7) without prompting",
+    )
     args = parser.parse_args()
 
     if args.dir:
         root = Path(args.dir)
         if not root.is_dir():
             sys.exit(f"Error: '{args.dir}' is not a directory.")
-        run_directory(root)
+        run_directory(root, acoustid_key=args.acoustid_key, auto_identify=args.auto_identify)
         return
 
     if args.mbid:
