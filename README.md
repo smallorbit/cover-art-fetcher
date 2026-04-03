@@ -1,32 +1,51 @@
 # cover-art-fetcher
 
-Fetches cover art from the [Cover Art Archive](https://coverartarchive.org) for MusicBrainz releases. Works in two modes: single release by MBID, or batch scan of a music library directory.
+Fetches cover art from the [Cover Art Archive](https://coverartarchive.org) for MusicBrainz releases. Two modes available:
+
+- **CLI tool** — batch-process a music library or download art for a single release
+- **Web app** — interactive browser UI for browsing, searching, and managing cover art
 
 ## Requirements
 
-Python 3.10+. For directory mode, `mutagen` is required:
+Python 3.10+. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick start
 
-**Single release** — provide a MusicBrainz release ID:
+### Web app (easiest)
+
+```bash
+python server.py
+```
+
+Open `http://localhost:5000` in your browser. Navigate to a music folder or paste a MusicBrainz release ID to browse and download cover art.
+
+### CLI: single release
 
 ```bash
 python fetch_cover_art.py 76df3287-6cda-33eb-8e9a-044b5e15ffdd
 ```
 
-Creates a folder named `Artist - Album [mbid]/` in the current directory containing the downloaded art.
+Creates a folder `Artist - Album [mbid]/` in the current directory with downloaded cover art.
 
-**Directory scan** — point it at your music library:
+### CLI: batch scan a directory
 
 ```bash
 python fetch_cover_art.py --dir ~/Music
 ```
 
-Walks the directory tree, finds folders containing audio files, reads the MusicBrainz release ID from their tags, and downloads cover art into each folder. Folders that already have a `.media/` directory are skipped.
+Walks the directory tree, reads the MusicBrainz release ID from each audio file's tags, and downloads cover art. Folders that already have a `.media/` directory are skipped.
+
+### CLI: identify untagged music
+
+```bash
+python fetch_cover_art.py --dir ~/Music --identify
+```
+
+Uses AcoustID fingerprinting to identify untagged music files, looks up their release on MusicBrainz, and downloads cover art.
 
 ## Output structure
 
@@ -40,8 +59,8 @@ Artist - Album/
     ...            ← all other images from the release
 ```
 
-## Supported formats
+## Supported audio formats
 
 `.mp3` `.flac` `.ogg` `.opus` `.m4a` `.aac` `.wma` `.wav` `.aiff` `.ape` `.alac`
 
-MusicBrainz release IDs must be present in the file tags for directory mode to work. Most music tagged with [MusicBrainz Picard](https://picard.musicbrainz.org) will have these.
+For CLI `--dir` mode, MusicBrainz release IDs must be present in file tags. Most music tagged with [MusicBrainz Picard](https://picard.musicbrainz.org) will have these.
