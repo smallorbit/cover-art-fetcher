@@ -353,7 +353,7 @@ def _require_mutagen():
     try:
         import mutagen  # noqa: F401
     except ImportError:
-        sys.exit(
+        raise ImportError(
             "mutagen is required for directory mode.\n"
             "Install it with: pip install mutagen"
         )
@@ -590,7 +590,10 @@ def main() -> None:
         root = Path(args.dir)
         if not root.is_dir():
             sys.exit(f"Error: '{args.dir}' is not a directory.")
-        run_directory(root, acoustid_key=args.acoustid_key, auto_identify=args.auto_identify)
+        try:
+            run_directory(root, acoustid_key=args.acoustid_key, auto_identify=args.auto_identify)
+        except ImportError as e:
+            sys.exit(str(e))
         return
 
     if args.mbid:
