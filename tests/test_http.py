@@ -14,7 +14,7 @@ from fetch_cover_art import (
     lookup_acoustid,
     post,
 )
-from server import _search_itunes
+from sources import _search_itunes
 
 
 def _mock_urlopen_response(data: bytes, status=200):

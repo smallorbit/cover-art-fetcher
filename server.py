@@ -2,18 +2,14 @@
 """Web app for browsing album cover art and finding higher-resolution replacements."""
 
 import argparse
-import hashlib
 import io
 import json
 import os
 import re
-import struct
 import threading
 import time
 import urllib.parse
 import urllib.request
-import urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, abort
@@ -32,6 +28,10 @@ from fetch_cover_art import (
     USER_AGENT,
     FetchError,
 )
+from library import _album_id, _find_cover, _cover_info, _parse_artist_album, scan_library
+from probing import _detect_duplicates
+from sources import fetch_sources, _search_itunes, _search_discogs, _search_caa
+import sources as _sources_mod
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -65,396 +65,7 @@ def _rate_limited_mb(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
-def _album_id(path: Path) -> str:
-    return hashlib.md5(str(path).encode()).hexdigest()[:12]
-
-
-def _find_cover(album_dir: Path) -> Path | None:
-    for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-        p = album_dir / f"cover{ext}"
-        if p.exists():
-            return p
-    return None
-
-
-def _cover_info(cover_path: Path | None) -> dict:
-    if cover_path is None or not cover_path.exists():
-        return {"has_cover": False, "cover_size_kb": 0, "cover_width": 0, "cover_height": 0}
-    size_kb = round(cover_path.stat().st_size / 1024, 1)
-    try:
-        with Image.open(cover_path) as img:
-            w, h = img.size
-    except Exception:
-        w, h = 0, 0
-    return {"has_cover": True, "cover_size_kb": size_kb, "cover_width": w, "cover_height": h}
-
-
-def _parse_artist_album(dirname: str) -> tuple[str, str]:
-    """Best-effort parse 'Artist - Album' or 'Artist - Album [mbid]' from folder name."""
-    import re
-    name = re.sub(r"\s*\[[\da-f-]{36}\]\s*$", "", dirname)
-    if " - " in name:
-        parts = name.split(" - ", 1)
-        return parts[0].strip(), parts[1].strip()
-    return "", name.strip()
-
-
-def scan_library(root: Path) -> dict[str, dict]:
-    result = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        path = Path(dirpath)
-        if not any(Path(f).suffix.lower() in MUSIC_EXTENSIONS for f in filenames):
-            continue
-        aid = _album_id(path)
-        music_file = first_music_file(path)
-        mbid = None
-        if music_file:
-            try:
-                mbid = read_mbid_from_file(music_file)
-            except Exception:
-                pass
-        cover_path = _find_cover(path)
-        info = _cover_info(cover_path)
-        artist, album_name = _parse_artist_album(path.name)
-        if not artist and path.parent != root:
-            artist = path.parent.name
-        if not album_name:
-            album_name = path.name
-        result[aid] = {
-            "id": aid,
-            "path": path,
-            "name": path.name,
-            "artist": artist,
-            "album_name": album_name,
-            "mbid": mbid,
-            "cover_path": cover_path,
-            **info,
-        }
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Image probing — get actual file size and resolution from remote images
-# ---------------------------------------------------------------------------
-
-def _head_size(url: str) -> int | None:
-    """Do a HEAD request and return Content-Length in bytes, or None."""
-    try:
-        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            cl = resp.headers.get("Content-Length")
-            return int(cl) if cl else None
-    except Exception:
-        return None
-
-
-def _read_jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
-    """Parse JPEG SOF markers to extract width x height from partial data."""
-    i = 0
-    if len(data) < 2 or data[0:2] != b'\xff\xd8':
-        return None
-    i = 2
-    while i < len(data) - 8:
-        if data[i] != 0xFF:
-            break
-        marker = data[i + 1]
-        if marker == 0xD9:  # EOI
-            break
-        if marker in (0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0x01, 0xFF):
-            i += 2
-            continue
-        if i + 4 > len(data):
-            break
-        seg_len = struct.unpack(">H", data[i + 2:i + 4])[0]
-        # SOF markers: C0-C3, C5-C7, C9-CB, CD-CF
-        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
-                      0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
-            if i + 9 <= len(data):
-                h = struct.unpack(">H", data[i + 5:i + 7])[0]
-                w = struct.unpack(">H", data[i + 7:i + 9])[0]
-                return (w, h)
-        i += 2 + seg_len
-    return None
-
-
-def _read_png_dimensions(data: bytes) -> tuple[int, int] | None:
-    """Parse PNG IHDR to extract width x height."""
-    if len(data) < 24 or data[0:8] != b'\x89PNG\r\n\x1a\n':
-        return None
-    w = struct.unpack(">I", data[16:20])[0]
-    h = struct.unpack(">I", data[20:24])[0]
-    return (w, h)
-
-
-def _probe_image(url: str) -> dict:
-    """Probe a remote image for file size and dimensions.
-
-    Returns {"size_kb": float, "width": int, "height": int}.
-    Values are 0 if unknown.
-    """
-    result = {"size_kb": 0, "width": 0, "height": 0}
-
-    try:
-        # Fetch first 64KB — enough to read JPEG/PNG headers and get Content-Length
-        req = urllib.request.Request(url, headers={
-            "User-Agent": USER_AGENT,
-            "Range": "bytes=0-65535",
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            # Content-Length from range response or full response
-            cl = resp.headers.get("Content-Range")
-            if cl and "/" in cl:
-                total = cl.split("/")[-1]
-                if total.isdigit():
-                    result["size_kb"] = round(int(total) / 1024, 1)
-            else:
-                cl_header = resp.headers.get("Content-Length")
-                if cl_header:
-                    result["size_kb"] = round(int(cl_header) / 1024, 1)
-
-            data = resp.read()
-
-            # Try JPEG
-            dims = _read_jpeg_dimensions(data)
-            if dims:
-                result["width"], result["height"] = dims
-            else:
-                # Try PNG
-                dims = _read_png_dimensions(data)
-                if dims:
-                    result["width"], result["height"] = dims
-    except Exception:
-        # Fall back to HEAD for size only
-        size = _head_size(url)
-        if size:
-            result["size_kb"] = round(size / 1024, 1)
-
-    return result
-
-
-def _probe_images_batch(images: list[dict]) -> list[dict]:
-    """Probe a batch of images in parallel, adding size_kb/width/height to each."""
-    def probe_one(img):
-        # For iTunes, dimensions are known from the URL pattern
-        if "itunes.apple.com" in img.get("url", ""):
-            url = img["url"]
-            for sz in ("3000x3000", "1200x1200", "600x600"):
-                if sz in url:
-                    dim = int(sz.split("x")[0])
-                    img["width"] = dim
-                    img["height"] = dim
-                    break
-            # Still need file size
-            size = _head_size(url)
-            if size:
-                img["size_kb"] = round(size / 1024, 1)
-            return img
-
-        # For everything else, do a partial download probe
-        info = _probe_image(img["url"])
-        img["size_kb"] = info["size_kb"]
-        img["width"] = info["width"]
-        img["height"] = info["height"]
-        return img
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(probe_one, img): img for img in images}
-        for f in as_completed(futures):
-            try:
-                f.result()
-            except Exception:
-                pass
-    return images
-
-
-def _detect_duplicates(images: list[dict], current_size_kb: float,
-                       current_w: int, current_h: int) -> list[dict]:
-    """Mark images that are likely the same as the current cover.
-
-    Adds a "match" field: "current" if likely the same image, else None.
-    """
-    for img in images:
-        img["match"] = None
-        if current_size_kb <= 0:
-            continue
-
-        sz = img.get("size_kb", 0)
-        w = img.get("width", 0)
-        h = img.get("height", 0)
-
-        # Exact or near-exact file size match (within 2%)
-        if sz > 0 and abs(sz - current_size_kb) / current_size_kb < 0.02:
-            img["match"] = "current"
-            continue
-
-        # Same resolution AND similar file size (within 15%)
-        if (w > 0 and h > 0 and w == current_w and h == current_h
-                and sz > 0 and abs(sz - current_size_kb) / current_size_kb < 0.15):
-            img["match"] = "current"
-
-    return images
-
-
-# ---------------------------------------------------------------------------
-# Cover art sources
-# ---------------------------------------------------------------------------
-
-def _search_caa(mbid: str) -> dict:
-    """Search Cover Art Archive for all images."""
-    source = {"source": "Cover Art Archive", "images": []}
-    if not mbid:
-        return source
-    try:
-        listing = _rate_limited_mb(fetch_cover_art_listing, mbid)
-    except FetchError:
-        return source
-    for img in listing.get("images", []):
-        img_id = img["id"]
-        types = ", ".join(img.get("types", [])) or "Unknown"
-        base_url = img["image"].rsplit(".", 1)[0]
-        # Offer multiple size tiers
-        for label, url in [
-            ("Original", img["image"]),
-            ("1200px", f"{base_url}-1200.jpg"),
-            ("500px", f"{base_url}-500.jpg"),
-        ]:
-            source["images"].append({
-                "id": f"caa-{img_id}-{label.lower().replace('px','')}",
-                "url": url,
-                "thumbnail_url": f"{base_url}-250.jpg",
-                "type": types,
-                "label": label,
-                "source_detail": f"{types} ({label})",
-            })
-    return source
-
-
-def _search_itunes(artist: str, album: str) -> dict:
-    """Search iTunes for album artwork."""
-    source = {"source": "iTunes", "images": []}
-    if not artist and not album:
-        return source
-    query = f"{artist} {album}".strip()
-    encoded = urllib.parse.quote(query)
-    url = f"https://itunes.apple.com/search?term={encoded}&entity=album&limit=5"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-    except Exception:
-        return source
-    for i, result in enumerate(data.get("results", [])):
-        artwork_url = result.get("artworkUrl100", "")
-        if not artwork_url:
-            continue
-        collection = result.get("collectionName", "Unknown Album")
-        result_artist = result.get("artistName", "Unknown Artist")
-        for size_label, size_str in [("3000px", "3000x3000bb"), ("1200px", "1200x1200bb"), ("600px", "600x600bb")]:
-            big_url = artwork_url.replace("100x100bb", size_str)
-            source["images"].append({
-                "id": f"itunes-{i}-{size_label.replace('px','')}",
-                "url": big_url,
-                "thumbnail_url": artwork_url,
-                "type": "Front",
-                "label": size_label,
-                "source_detail": f"{result_artist} - {collection} ({size_label})",
-            })
-    return source
-
-
-def _search_discogs(artist: str, album: str) -> dict:
-    """Search Discogs for cover images. Requires DISCOGS_TOKEN."""
-    source = {"source": "Discogs", "images": []}
-    if not DISCOGS_TOKEN:
-        return source
-    if not artist and not album:
-        return source
-    params = {}
-    if album:
-        params["release_title"] = album
-    if artist:
-        params["artist"] = artist
-    params["type"] = "release"
-    params["per_page"] = "5"
-    params["token"] = DISCOGS_TOKEN
-    qs = urllib.parse.urlencode(params)
-    url = f"https://api.discogs.com/database/search?{qs}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-    except Exception:
-        return source
-    for i, result in enumerate(data.get("results", [])):
-        cover = result.get("cover_image", "")
-        thumb = result.get("thumb", "")
-        title = result.get("title", "Unknown")
-        if not cover:
-            continue
-        source["images"].append({
-            "id": f"discogs-{i}",
-            "url": cover,
-            "thumbnail_url": thumb or cover,
-            "type": "Front",
-            "label": "Original",
-            "source_detail": title,
-        })
-    return source
-
-
-def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> list[dict]:
-    """Query all sources in parallel, probe images, and detect duplicates."""
-    mbid = album.get("mbid")
-
-    if not artist and not album_name:
-        # Try to get artist/album from MusicBrainz first
-        if mbid:
-            try:
-                artist, album_name = _rate_limited_mb(fetch_release_info, mbid)
-            except FetchError:
-                pass
-
-        # Fallback: parse from directory name
-        if not artist and not album_name:
-            artist, album_name = _parse_artist_album(album["name"])
-
-    sources = []
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
-            pool.submit(_search_caa, mbid): "caa",
-            pool.submit(_search_itunes, artist, album_name): "itunes",
-            pool.submit(_search_discogs, artist, album_name): "discogs",
-        }
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result["images"]:
-                    sources.append(result)
-            except Exception:
-                pass
-
-    # Probe all images for actual size/resolution
-    all_images = [img for src in sources for img in src["images"]]
-    if all_images:
-        _probe_images_batch(all_images)
-
-        # Detect duplicates of the current cover
-        _detect_duplicates(
-            all_images,
-            album.get("cover_size_kb", 0),
-            album.get("cover_width", 0),
-            album.get("cover_height", 0),
-        )
-
-        # Sort each source's images: largest first (by pixel count, then file size)
-        for src in sources:
-            src["images"].sort(
-                key=lambda img: (img.get("width", 0) * img.get("height", 0), img.get("size_kb", 0)),
-                reverse=True,
-            )
-
-    return sources
+_sources_mod.init(_rate_limited_mb)
 
 
 # ---------------------------------------------------------------------------
@@ -549,11 +160,10 @@ def api_album_replace(album_id):
     except Exception as e:
         return jsonify({"error": f"Failed to download: {e}"}), 502
 
-    # Validate image
     try:
         img = Image.open(io.BytesIO(img_data))
         img.verify()
-        img = Image.open(io.BytesIO(img_data))  # re-open after verify
+        img = Image.open(io.BytesIO(img_data))
         w, h = img.size
     except Exception:
         return jsonify({"error": "Downloaded data is not a valid image"}), 400
@@ -562,7 +172,6 @@ def api_album_replace(album_id):
     if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         ext = ".jpg"
 
-    # Remove old cover files
     for old_ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         old = album_dir / f"cover{old_ext}"
         if old.exists():
@@ -571,11 +180,9 @@ def api_album_replace(album_id):
         if old_thumb.exists():
             old_thumb.unlink()
 
-    # Write new cover
     cover_path = album_dir / f"cover{ext}"
     cover_path.write_bytes(img_data)
 
-    # Generate thumbnail
     try:
         thumb = img.copy()
         thumb.thumbnail((250, 250), Image.LANCZOS)
@@ -585,9 +192,8 @@ def api_album_replace(album_id):
         else:
             thumb.save(thumb_path)
     except Exception:
-        pass  # thumbnail generation failure is non-critical
+        pass
 
-    # Update cache
     size_kb = round(len(img_data) / 1024, 1)
     with _albums_lock:
         albums[album_id]["cover_path"] = cover_path
@@ -641,7 +247,6 @@ def api_album_media_file(album_id, filename):
     media_path = album["path"] / ".media" / filename
     if not media_path.exists() or not media_path.is_file():
         abort(404)
-    # Prevent path traversal
     try:
         media_path.resolve().relative_to((album["path"] / ".media").resolve())
     except ValueError:
@@ -662,8 +267,6 @@ def api_album_save_media(album_id):
 
     url = data["url"]
     img_type = data.get("type", "Art").strip()
-    # Sanitize type for filename: replace slashes, remove unsafe chars
-    import re
     safe_type = re.sub(r'[<>:"/\\|?*]', '', img_type.replace("/", "-").replace(" ", "_"))
     if not safe_type:
         safe_type = "Art"
@@ -677,7 +280,6 @@ def api_album_save_media(album_id):
     except Exception as e:
         return jsonify({"error": f"Failed to download: {e}"}), 502
 
-    # Validate image
     try:
         img = Image.open(io.BytesIO(img_data))
         img.verify()
@@ -690,7 +292,6 @@ def api_album_save_media(album_id):
     if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         ext = ".jpg"
 
-    # Generate a unique filename: Type-001.ext, Type-002.ext, ...
     counter = 1
     while True:
         filename = f"{safe_type}-{counter:03d}{ext}"
@@ -760,7 +361,6 @@ def api_album_use_media(album_id):
     except Exception:
         return jsonify({"error": "File is not a valid image"}), 400
 
-    # Archive current cover into .media/ before replacing it
     current_cover = _find_cover(album_dir)
     if current_cover:
         media_dir.mkdir(exist_ok=True)

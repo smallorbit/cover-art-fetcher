@@ -9,6 +9,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import server
+from library import _album_id, _cover_info
 
 
 def make_png_header(width, height):
@@ -65,8 +66,8 @@ def populated_client(client, tmp_path):
     Image.new("RGB", (600, 600), color="blue").save(buf, format="JPEG")
     cover.write_bytes(buf.getvalue())
 
-    aid = server._album_id(album_dir)
-    info = server._cover_info(cover)
+    aid = _album_id(album_dir)
+    info = _cover_info(cover)
     server.albums[aid] = {
         "id": aid,
         "path": album_dir,

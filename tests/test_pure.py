@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from fetch_cover_art import ext_from_url, safe_dirname, build_output_dir
-from server import _parse_artist_album, _album_id, _detect_duplicates
+from library import _parse_artist_album, _album_id
+from probing import _detect_duplicates
 
 
 # --- ext_from_url ---
