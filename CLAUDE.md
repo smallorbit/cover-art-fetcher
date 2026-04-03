@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Single-file Python script (`fetch_cover_art.py`) that fetches cover art from the [Cover Art Archive](https://coverartarchive.org) for MusicBrainz releases. No framework, no build step — pure stdlib plus one optional third-party dependency.
+A dual-mode Python project:
+- **CLI tool** (`fetch_cover_art.py`) — fetches cover art from the [Cover Art Archive](https://coverartarchive.org) for MusicBrainz releases, with optional AcoustID fingerprint-based identification for untagged music
+- **Web app** (`server.py`) — interactive browser UI for browsing album art, searching MusicBrainz, and previewing higher-resolution replacements
 
-## Running the script
+## Running the CLI
 
 ```bash
 # Single release by MBID
@@ -14,30 +16,61 @@ python fetch_cover_art.py <mbid>
 
 # Scan a directory tree
 python fetch_cover_art.py --dir ~/Music
+
+# Identify untagged music using AcoustID fingerprints
+python fetch_cover_art.py --dir ~/Music --identify
 ```
+
+## Running the web app
+
+```bash
+python server.py
+```
+
+Opens an interactive UI at `http://localhost:5000` for browsing and managing cover art.
 
 ## Dependencies
 
-`mutagen` is the only third-party dependency, required only for `--dir` mode (reads MusicBrainz IDs from audio file tags). Install via:
+Install via:
 
 ```bash
 pip install -r requirements.txt
 ```
 
+- `mutagen` — read MusicBrainz IDs and audio metadata from files
+- `flask` — web framework for the UI
+- `Pillow` — image resizing and metadata handling
+
 ## Architecture
 
-Everything lives in `fetch_cover_art.py`. The flow is:
+### `fetch_cover_art.py`
 
-1. **Entry point** (`main`) — parses args, dispatches to `run_single` or `run_directory`
-2. **`run_single`** — looks up release metadata from MusicBrainz API, builds an output directory named `Artist - Album [mbid]/`, calls `download_cover_art`
-3. **`run_directory`** — walks a directory tree, finds music folders, reads the MBID from the first audio file's tags via `mutagen`, calls `download_cover_art` for each
-4. **`download_cover_art`** — fetches the CAA image listing, downloads front art in three sizes (`cover.*`, `thumbnail.*`, `.media/<type>-<id>.*`), downloads all other images into `.media/`
+Core library used by both CLI and web app. Key functions:
 
-Key constants at the top of the file: `CAA_BASE`, `MB_BASE`, `USER_AGENT`.
+- **`get(url)`**, **`post(url, data)`** — HTTP helpers for MusicBrainz and AcoustID APIs
+- **`first_music_file(path)`** — find the first audio file in a directory
+- **`read_mbid_from_file(path)`** — extract MusicBrainz release ID from file tags
+- **`fetch_release_info(mbid)`** — lookup release metadata from MusicBrainz
+- **`identify_file(path)`** — identify untagged music using AcoustID fingerprinting
+- **`download_cover_art(folder, mbid)`** — fetch and save all cover images for a release
+- **`run_single(mbid)`** — download art for a single release
+- **`run_directory(directory, identify=False)`** — batch download art for a music library
+
+Key constants: `CAA_BASE`, `MB_BASE`, `ACOUSTID_BASE`, `USER_AGENT`, `MUSIC_EXTENSIONS`.
+
+### `server.py`
+
+Flask web app that exposes `fetch_cover_art.py` functions via HTTP/JSON routes. Handles:
+
+- Album lookup and preview
+- MusicBrainz release searches and alternates
+- Full-size lightbox preview
+- Media asset management (delete, reorder)
+- AcoustID-based identification for untagged files
 
 ## Output structure
 
-For `--dir` mode, images are written into the music folder itself:
+For `--dir` mode, images are organized in the music folder:
 ```
 Artist - Album/
   cover.jpg        ← front art (1200px)
@@ -45,11 +78,11 @@ Artist - Album/
   .media/
     Front-<id>.jpg
     Back-<id>.jpg
-    ...
+    ...            ← other images from the release
 ```
 
-For single-MBID mode, a new folder `Artist - Album [mbid]/` is created in the current directory with the same structure.
+For single-MBID CLI mode, a new folder `Artist - Album [mbid]/` is created in the current directory.
 
 ## sample-library
 
-`sample-library/` contains a sample music library used for manual testing of `--dir` mode. It is gitignored. Some folders already have `.media/` populated (those are skipped on re-run).
+`sample-library/` is a test music library used for manual testing of `--dir` mode. Gitignored; some folders have pre-populated `.media/` directories (those are skipped on re-run).
