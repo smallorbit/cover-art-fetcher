@@ -5,7 +5,7 @@ import pytest
 from PIL import Image
 
 from conftest import make_jpeg_with_sof, make_png_header
-from server import _read_jpeg_dimensions, _read_png_dimensions
+from probing import _read_jpeg_dimensions, _read_png_dimensions
 
 
 class TestPngDimensions:
