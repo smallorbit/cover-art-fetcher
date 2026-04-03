@@ -102,18 +102,22 @@ def ext_from_url(url: str) -> str:
 # MusicBrainz / Cover Art Archive API
 # ---------------------------------------------------------------------------
 
+def _parse_artist_credits(credits: list) -> str:
+    parts = []
+    for credit in credits:
+        if isinstance(credit, dict) and "artist" in credit:
+            parts.append(credit["artist"]["name"])
+            if credit.get("joinphrase"):
+                parts.append(credit["joinphrase"])
+    return "".join(parts)
+
+
 def fetch_release_info(mbid: str) -> tuple[str, str]:
     """Return (artist, album) from the MusicBrainz API."""
     data = get(f"{MB_BASE}/{mbid}?fmt=json&inc=artist-credits")
     album = data.get("title", "")
-    credits = data.get("artist-credit", [])
-    artist_parts = []
-    for credit in credits:
-        if isinstance(credit, dict) and "artist" in credit:
-            artist_parts.append(credit["artist"]["name"])
-            if credit.get("joinphrase"):
-                artist_parts.append(credit["joinphrase"])
-    return "".join(artist_parts), album
+    artist = _parse_artist_credits(data.get("artist-credit", []))
+    return artist, album
 
 
 def fetch_release_metadata(mbid: str) -> dict:
@@ -124,14 +128,7 @@ def fetch_release_metadata(mbid: str) -> dict:
     """
     data = get(f"{MB_BASE}/{mbid}?fmt=json&inc=artist-credits+labels")
     album = data.get("title", "")
-    credits = data.get("artist-credit", [])
-    artist_parts = []
-    for credit in credits:
-        if isinstance(credit, dict) and "artist" in credit:
-            artist_parts.append(credit["artist"]["name"])
-            if credit.get("joinphrase"):
-                artist_parts.append(credit["joinphrase"])
-    artist = "".join(artist_parts)
+    artist = _parse_artist_credits(data.get("artist-credit", []))
 
     date = data.get("date", "")
     year = date[:4] if date else None
@@ -356,7 +353,7 @@ def _require_mutagen():
     try:
         import mutagen  # noqa: F401
     except ImportError:
-        sys.exit(
+        raise ImportError(
             "mutagen is required for directory mode.\n"
             "Install it with: pip install mutagen"
         )
@@ -593,7 +590,10 @@ def main() -> None:
         root = Path(args.dir)
         if not root.is_dir():
             sys.exit(f"Error: '{args.dir}' is not a directory.")
-        run_directory(root, acoustid_key=args.acoustid_key, auto_identify=args.auto_identify)
+        try:
+            run_directory(root, acoustid_key=args.acoustid_key, auto_identify=args.auto_identify)
+        except ImportError as e:
+            sys.exit(str(e))
         return
 
     if args.mbid:
