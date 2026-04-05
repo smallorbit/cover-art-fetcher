@@ -27,9 +27,9 @@ from fetch_cover_art import (
     USER_AGENT,
     FetchError,
 )
-from library import _album_id, _find_cover, _cover_info, _parse_artist_album, scan_library
-from probing import _detect_duplicates
-from sources import fetch_sources, _search_itunes, _search_discogs, _search_caa
+from library import album_id, find_cover, cover_info, parse_artist_album, scan_library
+from probing import detect_duplicates
+from sources import fetch_sources, search_itunes, search_discogs, search_caa
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -361,7 +361,7 @@ def api_album_use_media(album_id):
     except Exception:
         return jsonify({"error": "File is not a valid image"}), 400
 
-    current_cover = _find_cover(album_dir)
+    current_cover = find_cover(album_dir)
     if current_cover:
         media_dir.mkdir(exist_ok=True)
         cover_ext = current_cover.suffix
