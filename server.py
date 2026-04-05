@@ -9,7 +9,6 @@ import re
 import threading
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, abort
@@ -435,13 +434,9 @@ def api_mb_releases(album_id):
         f"https://musicbrainz.org/ws/2/release"
         f"?query={urllib.parse.quote(query)}&fmt=json&limit=12"
     )
-    def _do_search():
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
 
     try:
-        data = _rate_limited_mb(_do_search)
+        data = _rate_limited_mb(caa_get, url)
     except Exception:
         return jsonify({"releases": []})
 
