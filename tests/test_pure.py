@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from fetch_cover_art import ext_from_url, safe_dirname, build_output_dir
-from library import _parse_artist_album, _album_id
-from probing import _detect_duplicates
+from library import parse_artist_album, album_id
+from probing import detect_duplicates
 
 
 # --- ext_from_url ---
@@ -84,62 +84,62 @@ def test_build_output_dir_special_chars_sanitized():
     assert result == Path("AC_DC - Who Made Who_ [abc-123]")
 
 
-# --- _parse_artist_album ---
+# --- parse_artist_album ---
 
 def test_parse_artist_album_standard():
-    assert _parse_artist_album("Pink Floyd - DSOTM") == ("Pink Floyd", "DSOTM")
+    assert parse_artist_album("Pink Floyd - DSOTM") == ("Pink Floyd", "DSOTM")
 
 
 def test_parse_artist_album_strips_mbid_suffix():
-    assert _parse_artist_album(
+    assert parse_artist_album(
         "Pink Floyd - DSOTM [76df3287-6cda-33eb-8e9a-044b5e15ffdd]"
     ) == ("Pink Floyd", "DSOTM")
 
 
 def test_parse_artist_album_no_separator():
-    assert _parse_artist_album("JustAnAlbum") == ("", "JustAnAlbum")
+    assert parse_artist_album("JustAnAlbum") == ("", "JustAnAlbum")
 
 
 def test_parse_artist_album_multiple_dashes_splits_on_first():
-    assert _parse_artist_album("A - B - C") == ("A", "B - C")
+    assert parse_artist_album("A - B - C") == ("A", "B - C")
 
 
 def test_parse_artist_album_whitespace_handling():
-    assert _parse_artist_album("  Artist  -  Album  ") == ("Artist", "Album")
+    assert parse_artist_album("  Artist  -  Album  ") == ("Artist", "Album")
 
 
 def test_parse_artist_album_non_uuid_brackets_preserved():
-    assert _parse_artist_album("Artist - Album [Deluxe]") == ("Artist", "Album [Deluxe]")
+    assert parse_artist_album("Artist - Album [Deluxe]") == ("Artist", "Album [Deluxe]")
 
 
-# --- _album_id ---
+# --- album_id ---
 
 def test_album_id_deterministic():
     p = Path("/music/Pink Floyd - DSOTM")
-    assert _album_id(p) == _album_id(p)
+    assert album_id(p) == album_id(p)
 
 
 def test_album_id_different_paths_differ():
-    assert _album_id(Path("/a")) != _album_id(Path("/b"))
+    assert album_id(Path("/a")) != album_id(Path("/b"))
 
 
-# --- _detect_duplicates ---
+# --- detect_duplicates ---
 
 def test_detect_duplicates_exact_size_match():
     images = [{"size_kb": 100.5, "width": 800, "height": 800}]
-    result = _detect_duplicates(images, current_size_kb=101.0, current_w=600, current_h=600)
+    result = detect_duplicates(images, current_size_kb=101.0, current_w=600, current_h=600)
     assert result[0]["match"] == "current"
 
 
 def test_detect_duplicates_resolution_and_size_match():
     images = [{"size_kb": 110.0, "width": 600, "height": 600}]
-    result = _detect_duplicates(images, current_size_kb=100.0, current_w=600, current_h=600)
+    result = detect_duplicates(images, current_size_kb=100.0, current_w=600, current_h=600)
     assert result[0]["match"] == "current"
 
 
 def test_detect_duplicates_no_match_when_too_different():
     images = [{"size_kb": 200.0, "width": 800, "height": 800}]
-    result = _detect_duplicates(images, current_size_kb=100.0, current_w=600, current_h=600)
+    result = detect_duplicates(images, current_size_kb=100.0, current_w=600, current_h=600)
     assert result[0]["match"] is None
 
 
@@ -148,11 +148,11 @@ def test_detect_duplicates_skips_all_when_no_current_cover():
         {"size_kb": 100.0, "width": 600, "height": 600},
         {"size_kb": 200.0, "width": 800, "height": 800},
     ]
-    result = _detect_duplicates(images, current_size_kb=0, current_w=0, current_h=0)
+    result = detect_duplicates(images, current_size_kb=0, current_w=0, current_h=0)
     assert all(img["match"] is None for img in result)
 
 
 def test_detect_duplicates_size_match_takes_priority():
     images = [{"size_kb": 100.0, "width": 600, "height": 600}]
-    result = _detect_duplicates(images, current_size_kb=100.5, current_w=600, current_h=600)
+    result = detect_duplicates(images, current_size_kb=100.5, current_w=600, current_h=600)
     assert result[0]["match"] == "current"

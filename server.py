@@ -9,7 +9,6 @@ import re
 import threading
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, abort
@@ -28,10 +27,9 @@ from fetch_cover_art import (
     USER_AGENT,
     FetchError,
 )
-from library import _album_id, _find_cover, _cover_info, _parse_artist_album, scan_library
-from probing import _detect_duplicates
-from sources import fetch_sources, _search_itunes, _search_discogs, _search_caa
-import sources as _sources_mod
+from library import album_id, find_cover, cover_info, parse_artist_album, scan_library
+from probing import detect_duplicates
+from sources import fetch_sources, search_itunes, search_discogs, search_caa
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -65,7 +63,18 @@ def _rate_limited_mb(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
-_sources_mod.init(_rate_limited_mb)
+def _save_thumbnail(img: Image.Image, album_dir: Path, ext: str) -> None:
+    try:
+        thumb = img.copy()
+        thumb.thumbnail((250, 250), Image.LANCZOS)
+        thumb_path = album_dir / f"thumbnail{ext}"
+        if ext in (".jpg", ".jpeg"):
+            thumb.save(thumb_path, "JPEG", quality=85)
+        else:
+            thumb.save(thumb_path)
+    except Exception:
+        pass
+
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +127,7 @@ def api_album_sources(album_id):
         album = albums.get(album_id)
     if not album:
         abort(404)
-    sources = fetch_sources(album)
+    sources = fetch_sources(album, rate_limited_mb=_rate_limited_mb)
     return jsonify({"sources": sources})
 
 
@@ -138,7 +147,7 @@ def api_mbid_sources(mbid):
         "cover_width": 0,
         "cover_height": 0,
     }
-    sources = fetch_sources(synthetic_album, artist=release["artist"], album_name=release["album"])
+    sources = fetch_sources(synthetic_album, artist=release["artist"], album_name=release["album"], rate_limited_mb=_rate_limited_mb)
     return jsonify({"sources": sources, "release": release})
 
 
@@ -183,16 +192,7 @@ def api_album_replace(album_id):
     cover_path = album_dir / f"cover{ext}"
     cover_path.write_bytes(img_data)
 
-    try:
-        thumb = img.copy()
-        thumb.thumbnail((250, 250), Image.LANCZOS)
-        thumb_path = album_dir / f"thumbnail{ext}"
-        if ext in (".jpg", ".jpeg"):
-            thumb.save(thumb_path, "JPEG", quality=85)
-        else:
-            thumb.save(thumb_path)
-    except Exception:
-        pass
+    _save_thumbnail(img, album_dir, ext)
 
     size_kb = round(len(img_data) / 1024, 1)
     with _albums_lock:
@@ -361,7 +361,7 @@ def api_album_use_media(album_id):
     except Exception:
         return jsonify({"error": "File is not a valid image"}), 400
 
-    current_cover = _find_cover(album_dir)
+    current_cover = find_cover(album_dir)
     if current_cover:
         media_dir.mkdir(exist_ok=True)
         cover_ext = current_cover.suffix
@@ -384,16 +384,8 @@ def api_album_use_media(album_id):
 
     size_kb = round(len(img_data) / 1024, 1)
 
-    try:
-        thumb_img = Image.open(new_cover)
-        thumb_img.thumbnail((250, 250), Image.LANCZOS)
-        thumb_path = album_dir / f"thumbnail{new_ext}"
-        if new_ext in (".jpg", ".jpeg"):
-            thumb_img.save(thumb_path, "JPEG", quality=85)
-        else:
-            thumb_img.save(thumb_path)
-    except Exception:
-        pass
+    thumb_img = Image.open(new_cover)
+    _save_thumbnail(thumb_img, album_dir, new_ext)
 
     with _albums_lock:
         albums[album_id]["cover_path"] = new_cover
@@ -435,13 +427,9 @@ def api_mb_releases(album_id):
         f"https://musicbrainz.org/ws/2/release"
         f"?query={urllib.parse.quote(query)}&fmt=json&limit=12"
     )
-    def _do_search():
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
 
     try:
-        data = _rate_limited_mb(_do_search)
+        data = _rate_limited_mb(caa_get, url)
     except Exception:
         return jsonify({"releases": []})
 

@@ -12,26 +12,17 @@ from fetch_cover_art import (
     fetch_cover_art_listing,
     fetch_release_info,
 )
-from library import _parse_artist_album
-from probing import _detect_duplicates, _probe_images_batch
+from library import parse_artist_album
+from probing import detect_duplicates, probe_images_batch
 
 DISCOGS_TOKEN: str | None = os.environ.get("DISCOGS_TOKEN")
 
-_rate_limited_mb = None
-
-
-def init(rate_limited_mb_fn):
-    global _rate_limited_mb
-    _rate_limited_mb = rate_limited_mb_fn
-
-
-def _search_caa(mbid: str) -> dict:
-    """Search Cover Art Archive for all images."""
+def search_caa(mbid: str, rate_limited_mb) -> dict:
     source = {"source": "Cover Art Archive", "images": []}
     if not mbid:
         return source
     try:
-        listing = _rate_limited_mb(fetch_cover_art_listing, mbid)
+        listing = rate_limited_mb(fetch_cover_art_listing, mbid)
     except FetchError:
         return source
     for img in listing.get("images", []):
@@ -54,7 +45,7 @@ def _search_caa(mbid: str) -> dict:
     return source
 
 
-def _search_itunes(artist: str, album: str) -> dict:
+def search_itunes(artist: str, album: str) -> dict:
     """Search iTunes for album artwork."""
     source = {"source": "iTunes", "images": []}
     if not artist and not album:
@@ -87,7 +78,7 @@ def _search_itunes(artist: str, album: str) -> dict:
     return source
 
 
-def _search_discogs(artist: str, album: str) -> dict:
+def search_discogs(artist: str, album: str) -> dict:
     """Search Discogs for cover images. Requires DISCOGS_TOKEN."""
     source = {"source": "Discogs", "images": []}
     if not DISCOGS_TOKEN:
@@ -127,26 +118,25 @@ def _search_discogs(artist: str, album: str) -> dict:
     return source
 
 
-def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> list[dict]:
-    """Query all sources in parallel, probe images, and detect duplicates."""
+def fetch_sources(album: dict, *, artist: str = "", album_name: str = "", rate_limited_mb) -> list[dict]:
     mbid = album.get("mbid")
 
     if not artist and not album_name:
         if mbid:
             try:
-                artist, album_name = _rate_limited_mb(fetch_release_info, mbid)
+                artist, album_name = rate_limited_mb(fetch_release_info, mbid)
             except FetchError:
                 pass
 
         if not artist and not album_name:
-            artist, album_name = _parse_artist_album(album["name"])
+            artist, album_name = parse_artist_album(album["name"])
 
     sources = []
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
-            pool.submit(_search_caa, mbid): "caa",
-            pool.submit(_search_itunes, artist, album_name): "itunes",
-            pool.submit(_search_discogs, artist, album_name): "discogs",
+            pool.submit(search_caa, mbid, rate_limited_mb): "caa",
+            pool.submit(search_itunes, artist, album_name): "itunes",
+            pool.submit(search_discogs, artist, album_name): "discogs",
         }
         for future in as_completed(futures):
             try:
@@ -158,9 +148,9 @@ def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> lis
 
     all_images = [img for src in sources for img in src["images"]]
     if all_images:
-        _probe_images_batch(all_images)
+        probe_images_batch(all_images)
 
-        _detect_duplicates(
+        detect_duplicates(
             all_images,
             album.get("cover_size_kb", 0),
             album.get("cover_width", 0),
