@@ -30,7 +30,6 @@ from fetch_cover_art import (
 from library import _album_id, _find_cover, _cover_info, _parse_artist_album, scan_library
 from probing import _detect_duplicates
 from sources import fetch_sources, _search_itunes, _search_discogs, _search_caa
-import sources as _sources_mod
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -64,9 +63,6 @@ def _rate_limited_mb(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
-_sources_mod.init(_rate_limited_mb)
-
-
 def _save_thumbnail(img: Image.Image, album_dir: Path, ext: str) -> None:
     try:
         thumb = img.copy()
@@ -78,6 +74,7 @@ def _save_thumbnail(img: Image.Image, album_dir: Path, ext: str) -> None:
             thumb.save(thumb_path)
     except Exception:
         pass
+
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +127,7 @@ def api_album_sources(album_id):
         album = albums.get(album_id)
     if not album:
         abort(404)
-    sources = fetch_sources(album)
+    sources = fetch_sources(album, rate_limited_mb=_rate_limited_mb)
     return jsonify({"sources": sources})
 
 
@@ -150,7 +147,7 @@ def api_mbid_sources(mbid):
         "cover_width": 0,
         "cover_height": 0,
     }
-    sources = fetch_sources(synthetic_album, artist=release["artist"], album_name=release["album"])
+    sources = fetch_sources(synthetic_album, artist=release["artist"], album_name=release["album"], rate_limited_mb=_rate_limited_mb)
     return jsonify({"sources": sources, "release": release})
 
 
