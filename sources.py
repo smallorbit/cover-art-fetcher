@@ -17,21 +17,12 @@ from probing import _detect_duplicates, _probe_images_batch
 
 DISCOGS_TOKEN: str | None = os.environ.get("DISCOGS_TOKEN")
 
-_rate_limited_mb = None
-
-
-def init(rate_limited_mb_fn):
-    global _rate_limited_mb
-    _rate_limited_mb = rate_limited_mb_fn
-
-
-def _search_caa(mbid: str) -> dict:
-    """Search Cover Art Archive for all images."""
+def _search_caa(mbid: str, rate_limited_mb) -> dict:
     source = {"source": "Cover Art Archive", "images": []}
     if not mbid:
         return source
     try:
-        listing = _rate_limited_mb(fetch_cover_art_listing, mbid)
+        listing = rate_limited_mb(fetch_cover_art_listing, mbid)
     except FetchError:
         return source
     for img in listing.get("images", []):
@@ -127,14 +118,13 @@ def _search_discogs(artist: str, album: str) -> dict:
     return source
 
 
-def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> list[dict]:
-    """Query all sources in parallel, probe images, and detect duplicates."""
+def fetch_sources(album: dict, *, artist: str = "", album_name: str = "", rate_limited_mb) -> list[dict]:
     mbid = album.get("mbid")
 
     if not artist and not album_name:
         if mbid:
             try:
-                artist, album_name = _rate_limited_mb(fetch_release_info, mbid)
+                artist, album_name = rate_limited_mb(fetch_release_info, mbid)
             except FetchError:
                 pass
 
@@ -144,7 +134,7 @@ def fetch_sources(album: dict, *, artist: str = "", album_name: str = "") -> lis
     sources = []
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
-            pool.submit(_search_caa, mbid): "caa",
+            pool.submit(_search_caa, mbid, rate_limited_mb): "caa",
             pool.submit(_search_itunes, artist, album_name): "itunes",
             pool.submit(_search_discogs, artist, album_name): "discogs",
         }
