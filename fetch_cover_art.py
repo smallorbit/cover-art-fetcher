@@ -10,6 +10,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -410,14 +411,14 @@ def first_music_file(directory: Path) -> Path | None:
 # Core download logic
 # ---------------------------------------------------------------------------
 
-def download_cover_art(mbid: str, out_dir: Path) -> None:
+def download_cover_art(mbid: str, out_dir: Path, log: Callable[[str], None] = print) -> None:
     """Download all cover art for mbid into out_dir."""
     listing = fetch_cover_art_listing(mbid)
     images = listing.get("images", [])
-    print(f"  Found {len(images)} image(s)")
+    log(f"  Found {len(images)} image(s)")
 
     if not images:
-        print("  Nothing to download.")
+        log("  Nothing to download.")
         return
 
     media_dir = out_dir / ".media"
@@ -438,33 +439,33 @@ def download_cover_art(mbid: str, out_dir: Path) -> None:
                 media_data = data_1200 if len(data_1200) > len(data_orig) else data_orig
                 media_path = media_dir / f"{types}-{img_id}{ext}"
                 media_path.write_bytes(media_data)
-                print(f"  .media/{media_path.name} ({len(media_data) // 1024} KB)")
+                log(f"  .media/{media_path.name} ({len(media_data) // 1024} KB)")
                 total += 1
                 cover_path = out_dir / f"cover{ext}"
                 cover_path.write_bytes(data_1200)
-                print(f"  cover{ext} ({len(data_1200) // 1024} KB)")
+                log(f"  cover{ext} ({len(data_1200) // 1024} KB)")
                 total += 1
             except Exception as e:
-                print(f"  .media/{types}-{img_id}{ext} or cover{ext} — FAILED: {e}")
+                log(f"  .media/{types}-{img_id}{ext} or cover{ext} — FAILED: {e}")
 
             try:
                 data_250 = fetch_bytes(f"{base}-250.jpg")
                 thumb_path = out_dir / f"thumbnail{ext}"
                 thumb_path.write_bytes(data_250)
-                print(f"  thumbnail{ext} ({len(data_250) // 1024} KB)")
+                log(f"  thumbnail{ext} ({len(data_250) // 1024} KB)")
                 total += 1
             except Exception as e:
-                print(f"  thumbnail{ext} — FAILED: {e}")
+                log(f"  thumbnail{ext} — FAILED: {e}")
         else:
             dest = media_dir / f"{types}-{img_id}{ext}"
             try:
                 size_bytes = download_image(img["image"], dest)
-                print(f"  .media/{dest.name} ({size_bytes // 1024} KB)")
+                log(f"  .media/{dest.name} ({size_bytes // 1024} KB)")
                 total += 1
             except Exception as e:
-                print(f"  .media/{dest.name} — FAILED: {e}")
+                log(f"  .media/{dest.name} — FAILED: {e}")
 
-    print(f"  Done. {total} file(s) saved.")
+    log(f"  Done. {total} file(s) saved.")
 
 
 # ---------------------------------------------------------------------------
