@@ -68,6 +68,19 @@ def _rate_limited_mb(fn, *args, **kwargs):
 _sources_mod.init(_rate_limited_mb)
 
 
+def _save_thumbnail(img: Image.Image, album_dir: Path, ext: str) -> None:
+    try:
+        thumb = img.copy()
+        thumb.thumbnail((250, 250), Image.LANCZOS)
+        thumb_path = album_dir / f"thumbnail{ext}"
+        if ext in (".jpg", ".jpeg"):
+            thumb.save(thumb_path, "JPEG", quality=85)
+        else:
+            thumb.save(thumb_path)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -183,16 +196,7 @@ def api_album_replace(album_id):
     cover_path = album_dir / f"cover{ext}"
     cover_path.write_bytes(img_data)
 
-    try:
-        thumb = img.copy()
-        thumb.thumbnail((250, 250), Image.LANCZOS)
-        thumb_path = album_dir / f"thumbnail{ext}"
-        if ext in (".jpg", ".jpeg"):
-            thumb.save(thumb_path, "JPEG", quality=85)
-        else:
-            thumb.save(thumb_path)
-    except Exception:
-        pass
+    _save_thumbnail(img, album_dir, ext)
 
     size_kb = round(len(img_data) / 1024, 1)
     with _albums_lock:
@@ -384,16 +388,8 @@ def api_album_use_media(album_id):
 
     size_kb = round(len(img_data) / 1024, 1)
 
-    try:
-        thumb_img = Image.open(new_cover)
-        thumb_img.thumbnail((250, 250), Image.LANCZOS)
-        thumb_path = album_dir / f"thumbnail{new_ext}"
-        if new_ext in (".jpg", ".jpeg"):
-            thumb_img.save(thumb_path, "JPEG", quality=85)
-        else:
-            thumb_img.save(thumb_path)
-    except Exception:
-        pass
+    thumb_img = Image.open(new_cover)
+    _save_thumbnail(thumb_img, album_dir, new_ext)
 
     with _albums_lock:
         albums[album_id]["cover_path"] = new_cover
