@@ -97,7 +97,7 @@ def _probe_image(url: str) -> dict:
     return result
 
 
-def _probe_images_batch(images: list[dict]) -> list[dict]:
+def probe_images_batch(images: list[dict]) -> list[dict]:
     """Probe a batch of images in parallel, adding size_kb/width/height to each."""
     def probe_one(img):
         if "itunes.apple.com" in img.get("url", ""):
@@ -129,8 +129,8 @@ def _probe_images_batch(images: list[dict]) -> list[dict]:
     return images
 
 
-def _detect_duplicates(images: list[dict], current_size_kb: float,
-                       current_w: int, current_h: int) -> list[dict]:
+def detect_duplicates(images: list[dict], current_size_kb: float,
+                      current_w: int, current_h: int) -> list[dict]:
     """Mark images that are likely the same as the current cover.
 
     Adds a "match" field: "current" if likely the same image, else None.

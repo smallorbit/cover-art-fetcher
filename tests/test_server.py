@@ -40,7 +40,7 @@ def test_albums_sorted_case_insensitive(client, tmp_path):
     for name in ["Zeppelin - II", "abba - Gold", "Beatles - Abbey"]:
         d = tmp_path / name
         d.mkdir()
-        aid = server._album_id(d)
+        aid = server.album_id(d)
         server.albums[aid] = {
             "id": aid,
             "path": d,
@@ -89,7 +89,7 @@ def test_album_cover_unknown_album(client):
 def test_album_cover_no_cover_path(client, tmp_path):
     d = tmp_path / "empty-album"
     d.mkdir()
-    aid = server._album_id(d)
+    aid = server.album_id(d)
     server.albums[aid] = {
         "id": aid,
         "path": d,

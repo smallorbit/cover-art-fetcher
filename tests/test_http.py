@@ -14,7 +14,7 @@ from fetch_cover_art import (
     lookup_acoustid,
     post,
 )
-from sources import _search_itunes
+from sources import search_itunes
 
 
 def _mock_urlopen_response(data: bytes, status=200):
@@ -237,7 +237,7 @@ class TestLookupAcoustid:
         assert lookup_acoustid("key", 180, "fp") == []
 
 
-# ── _search_itunes() ────────────────────────────────────────────
+# ── search_itunes() ────────────────────────────────────────────
 
 
 class TestSearchItunes:
@@ -250,7 +250,7 @@ class TestSearchItunes:
                 "artistName": "Pink Floyd",
             }]
         }).encode())
-        result = _search_itunes("Pink Floyd", "DSOTM")
+        result = search_itunes("Pink Floyd", "DSOTM")
         assert result["source"] == "iTunes"
         assert len(result["images"]) == 3
         urls = [img["url"] for img in result["images"]]
@@ -263,15 +263,15 @@ class TestSearchItunes:
         mock_urlopen.return_value = _mock_urlopen_response(json.dumps({
             "results": [{"collectionName": "X", "artistName": "Y"}]
         }).encode())
-        result = _search_itunes("Y", "X")
+        result = search_itunes("Y", "X")
         assert result["images"] == []
 
     @patch("urllib.request.urlopen")
     def test_network_error_returns_empty(self, mock_urlopen):
         mock_urlopen.side_effect = Exception("timeout")
-        result = _search_itunes("Pink Floyd", "DSOTM")
+        result = search_itunes("Pink Floyd", "DSOTM")
         assert result == {"source": "iTunes", "images": []}
 
     def test_empty_query_returns_empty(self):
-        result = _search_itunes("", "")
+        result = search_itunes("", "")
         assert result == {"source": "iTunes", "images": []}
